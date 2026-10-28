@@ -146,6 +146,49 @@ final class SlackClientTests: XCTestCase {
         XCTAssertNoThrow(try store.delete())
     }
 
+    @MainActor
+    func testDestinationDedupesPayloadAcrossMetadataChangesAndRecreation() async {
+        let suite = "SlackDestinationTests." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var requests = 0
+        var fail = false
+        SlackMockProtocol.handler = { _ in
+            requests += 1
+            return (200, [:], fail ? #"{"ok":false,"error":"invalid_auth"}"# : #"{"ok":true}"#)
+        }
+        func engine() -> StatusEngine {
+            let destination = SlackDestination(defaults: defaults, session: session, tokenProvider: { "xoxp-test" })
+            return StatusEngine(registry: DestinationRegistry(destinations: [destination], defaults: defaults), defaults: defaults)
+        }
+        let a = LocationStatus(locationName: "A", text: "Busy", emoji: ":office:", isOther: false)
+        var b = a
+        b.locationName = "B"
+        let first = engine()
+        await first.update(a)
+        await first.update(b)
+        XCTAssertEqual(requests, 1)
+        XCTAssertEqual(first.lastSentStatuses["slack"], b)
+        let recreated = engine()
+        var other = b
+        other.locationName = "Other"
+        other.isOther = true
+        await recreated.update(other)
+        XCTAssertEqual(requests, 1)
+        XCTAssertEqual(recreated.lastSentStatuses["slack"], other)
+        var changed = other
+        changed.text = "Away"
+        fail = true
+        await recreated.update(changed)
+        XCTAssertEqual(requests, 2)
+        XCTAssertNotNil(recreated.lastErrors["slack"])
+        fail = false
+        await engine().update(changed)
+        XCTAssertEqual(requests, 3, "A failed payload must remain eligible after recreation")
+        await engine().update(a)
+        XCTAssertEqual(requests, 4, "Returning to an older payload must publish again")
+    }
+
     private func client() -> SlackClient { SlackClient(token: "xoxp-test", session: session) }
 }
 
