@@ -31,10 +31,19 @@ targets:
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
+  SlackationUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [SlackationUITests]
+    dependencies:
+      - target: Slackation
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
   Slackation:
     build:
       targets:
         Slackation: all
     test:
-      targets: [SlackationTests]
+      targets: [SlackationTests, SlackationUITests]

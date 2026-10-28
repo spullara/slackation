@@ -17,10 +17,13 @@ final class DestinationTests: XCTestCase {
         XCTAssertNotNil(engine.lastErrors[first.id])
         XCTAssertNil(engine.lastErrors[second.id])
         XCTAssertNil(engine.lastSentStatuses[first.id])
+        XCTAssertNil(engine.lastSentDates[first.id])
+        XCTAssertNotNil(engine.lastSentDates[second.id])
         XCTAssertEqual(engine.lastSentStatuses[second.id], status)
 
         first.shouldFail = false
         let recreated = StatusEngine(registry: registry, defaults: defaults)
+        XCTAssertEqual(recreated.lastSentDates[second.id], engine.lastSentDates[second.id])
         await recreated.update(status)
         XCTAssertEqual(first.calls, [status, status])
         XCTAssertEqual(second.calls, [status])

@@ -5,6 +5,7 @@ import UIKit
 @Observable
 final class StatusEngine {
     private(set) var lastSentStatuses: [String: LocationStatus] = [:]
+    private(set) var lastSentDates: [String: Date] = [:]
     private(set) var lastErrors: [String: String] = [:]
     private(set) var isSending = false
     private let registry: DestinationRegistry
@@ -15,6 +16,7 @@ final class StatusEngine {
     init(registry: DestinationRegistry, defaults: UserDefaults = .standard) {
         self.registry = registry
         self.defaults = defaults
+        lastSentDates = defaults.dictionary(forKey: "Slackation.destinationStatusDates") as? [String: Date] ?? [:]
         if let data = defaults.data(forKey: Self.lastStatusKey),
            let saved = try? JSONDecoder().decode([String: LocationStatus].self, from: data) {
             lastSentStatuses = saved
@@ -39,6 +41,8 @@ final class StatusEngine {
                     do {
                         try await destination.publish(next)
                         self.lastSentStatuses[destination.id] = next
+                        self.lastSentDates[destination.id] = Date()
+                        self.defaults.set(self.lastSentDates, forKey: "Slackation.destinationStatusDates")
                         self.lastErrors[destination.id] = nil
                         if let data = try? JSONEncoder().encode(self.lastSentStatuses) {
                             self.defaults.set(data, forKey: Self.lastStatusKey)
