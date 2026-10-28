@@ -15,6 +15,6 @@ if not items:
 print(items[0][1]["udid"])
 ')
 fi
-exec xcodebuild -project Slackation.xcodeproj -scheme Slackation \
+exec xcodebuild -project Whereabouts.xcodeproj -scheme Whereabouts \
   -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
   -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO "$@"

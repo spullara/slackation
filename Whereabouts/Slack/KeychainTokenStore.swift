@@ -5,7 +5,7 @@ struct KeychainTokenStore {
     let service: String
     let account: String
 
-    init(service: String = "com.slackation.slack-token", account: String = "slack-user") {
+    init(service: String = "com.whereabouts.slack-token", account: String = "slack-user") {
         self.service = service
         self.account = account
     }

@@ -7,7 +7,7 @@ final class DestinationRegistry {
     let destinations: [any StatusDestination]
     private(set) var enabledIDs: Set<String>
     private let defaults: UserDefaults
-    private static let settingsKey = "Slackation.enabledDestinations"
+    private static let settingsKey = "Whereabouts.enabledDestinations"
 
     init(destinations: [any StatusDestination], defaults: UserDefaults = .standard) {
         precondition(Set(destinations.map(\.id)).count == destinations.count, "Destination IDs must be unique")

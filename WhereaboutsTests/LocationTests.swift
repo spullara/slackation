@@ -1,5 +1,5 @@
 import XCTest
-@testable import Slackation
+@testable import Whereabouts
 
 final class LocationTests: XCTestCase {
     func testResolverNoneOneAndOverlap() {

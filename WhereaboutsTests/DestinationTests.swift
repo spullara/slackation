@@ -1,5 +1,5 @@
 import XCTest
-@testable import Slackation
+@testable import Whereabouts
 
 @MainActor
 final class DestinationTests: XCTestCase {
@@ -67,17 +67,16 @@ final class DestinationTests: XCTestCase {
         XCTAssertEqual(first.calls, [status])
     }
 
-    func testSlackConfigurationAndLegacySuccessMigration() async throws {
+    func testSlackConfigurationAndSavedSuccess() async throws {
         let defaults = isolatedDefaults()
         XCTAssertFalse(SlackDestination(defaults: defaults, tokenProvider: { "  " }).isConfigured)
         XCTAssertFalse(SlackDestination(defaults: defaults, tokenProvider: { throw NSError(domain: "test", code: 1) }).isConfigured)
         let destination = SlackDestination(defaults: defaults, tokenProvider: { "token" })
         XCTAssertTrue(destination.isConfigured)
-        defaults.set(["text": "Office", "emoji": ":office:"], forKey: "Slackation.lastSuccessfulStatus")
+        defaults.set(["text": "Office", "emoji": ":office:"], forKey: "Whereabouts.slackSuccessfulPayload")
         let registry = DestinationRegistry(destinations: [destination], defaults: defaults)
         let status = LocationStatus(locationName: "Office", text: "Office", emoji: ":office:", isOther: false)
         await StatusEngine(registry: registry, defaults: defaults).update(status)
-        XCTAssertNil(defaults.object(forKey: "Slackation.lastSuccessfulStatus"))
         let recreated = StatusEngine(registry: registry, defaults: defaults)
         XCTAssertEqual(recreated.lastSentStatuses[destination.id], status)
         await recreated.update(status)

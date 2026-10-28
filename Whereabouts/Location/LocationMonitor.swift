@@ -12,7 +12,7 @@ final class LocationMonitor: NSObject, @preconcurrency CLLocationManagerDelegate
     private var geofences: [Geofence] = []
     private var other = OtherStatus()
     private var pendingIDs: Set<UUID> = []
-    private let prefix = "slackation."
+    private let prefix = "whereabouts."
 
     override init() {
         manager = CLLocationManager()

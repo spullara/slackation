@@ -11,12 +11,12 @@ final class StatusEngine {
     private let registry: DestinationRegistry
     private var pending: LocationStatus?
     private let defaults: UserDefaults
-    private static let lastStatusKey = "Slackation.destinationStatuses"
+    private static let lastStatusKey = "Whereabouts.destinationStatuses"
 
     init(registry: DestinationRegistry, defaults: UserDefaults = .standard) {
         self.registry = registry
         self.defaults = defaults
-        lastSentDates = defaults.dictionary(forKey: "Slackation.destinationStatusDates") as? [String: Date] ?? [:]
+        lastSentDates = defaults.dictionary(forKey: "Whereabouts.destinationStatusDates") as? [String: Date] ?? [:]
         if let data = defaults.data(forKey: Self.lastStatusKey),
            let saved = try? JSONDecoder().decode([String: LocationStatus].self, from: data) {
             lastSentStatuses = saved
@@ -43,7 +43,7 @@ final class StatusEngine {
                         self.lastSentStatuses[destination.id] = next
                         if case .sent = outcome {
                             self.lastSentDates[destination.id] = Date()
-                            self.defaults.set(self.lastSentDates, forKey: "Slackation.destinationStatusDates")
+                            self.defaults.set(self.lastSentDates, forKey: "Whereabouts.destinationStatusDates")
                         }
                         self.lastErrors[destination.id] = nil
                         if let data = try? JSONEncoder().encode(self.lastSentStatuses) {

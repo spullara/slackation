@@ -30,7 +30,7 @@ final class GeofenceStore {
     /// Call load() at startup and present any error to the user.
     init(fileURL: URL? = nil) {
         self.fileURL = fileURL ?? URL.applicationSupportDirectory
-            .appending(path: "Slackation", directoryHint: .isDirectory)
+            .appending(path: "Whereabouts", directoryHint: .isDirectory)
             .appending(path: "geofences.json")
     }
 

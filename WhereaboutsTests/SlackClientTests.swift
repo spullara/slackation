@@ -1,6 +1,6 @@
 import XCTest
 import Security
-@testable import Slackation
+@testable import Whereabouts
 
 final class SlackClientTests: XCTestCase {
     private var session: URLSession!
@@ -129,7 +129,7 @@ final class SlackClientTests: XCTestCase {
     }
 
     func testKeychainRoundTripUpdateAndDelete() throws {
-        let store = KeychainTokenStore(service: "com.slackation.tests.\(UUID().uuidString)")
+        let store = KeychainTokenStore(service: "com.whereabouts.tests.\(UUID().uuidString)")
         defer { try? store.delete() }
         do {
             let token = try store.read()
