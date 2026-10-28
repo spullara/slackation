@@ -25,3 +25,8 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+# Xcode generated files
+*.xcodeproj/
+DerivedData/
+*.xcresult/
