@@ -9,9 +9,16 @@ final class StatusEngine {
     private(set) var isSending = false
     private let client: any SlackStatusSetting
     private var pending: ResolvedStatus?
+    private let defaults: UserDefaults
+    private static let lastStatusKey = "Slackation.lastSuccessfulStatus"
 
-    init(client: any SlackStatusSetting) {
+    init(client: any SlackStatusSetting, defaults: UserDefaults = .standard) {
         self.client = client
+        self.defaults = defaults
+        if let saved = defaults.dictionary(forKey: Self.lastStatusKey),
+           let text = saved["text"] as? String, let emoji = saved["emoji"] as? String {
+            lastSentStatus = ResolvedStatus(text: text, emoji: emoji)
+        }
     }
 
     /// Serializes requests. While a request runs, only the latest desired status is retained.
@@ -27,6 +34,7 @@ final class StatusEngine {
             guard next != lastSentStatus else { continue }
             do {
                 try await client.setStatus(text: next.text, emoji: next.emoji)
+                defaults.set(["text": next.text, "emoji": next.emoji], forKey: Self.lastStatusKey)
                 lastSentStatus = next
                 lastError = nil
             } catch {
