@@ -7,7 +7,7 @@ final class LocationMonitor: NSObject, @preconcurrency CLLocationManagerDelegate
     private(set) var authorizationStatus: CLAuthorizationStatus
     private(set) var lastError: String?
     private(set) var insideIDs: Set<UUID> = []
-    var onStatusChange: ((ResolvedStatus) -> Void)?
+    var onStatusChange: ((LocationStatus) -> Void)?
     private let manager: CLLocationManager
     private var geofences: [Geofence] = []
     private var other = OtherStatus()

@@ -4,25 +4,26 @@ import UIKit
 @MainActor
 @Observable
 final class StatusEngine {
-    private(set) var lastSentStatus: ResolvedStatus?
-    private(set) var lastError: String?
+    private(set) var lastSentStatuses: [String: LocationStatus] = [:]
+    private(set) var lastErrors: [String: String] = [:]
     private(set) var isSending = false
-    private let client: any SlackStatusSetting
-    private var pending: ResolvedStatus?
+    private let registry: DestinationRegistry
+    private var pending: LocationStatus?
     private let defaults: UserDefaults
-    private static let lastStatusKey = "Slackation.lastSuccessfulStatus"
+    private static let lastStatusKey = "Slackation.destinationStatuses"
 
-    init(client: any SlackStatusSetting, defaults: UserDefaults = .standard) {
-        self.client = client
+    init(registry: DestinationRegistry, defaults: UserDefaults = .standard) {
+        self.registry = registry
         self.defaults = defaults
-        if let saved = defaults.dictionary(forKey: Self.lastStatusKey),
-           let text = saved["text"] as? String, let emoji = saved["emoji"] as? String {
-            lastSentStatus = ResolvedStatus(text: text, emoji: emoji)
+        if let data = defaults.data(forKey: Self.lastStatusKey),
+           let saved = try? JSONDecoder().decode([String: LocationStatus].self, from: data) {
+            lastSentStatuses = saved
         }
     }
 
-    /// Serializes requests. While a request runs, only the latest desired status is retained.
-    func update(_ status: ResolvedStatus) async {
+    /// Serializes events and retains only the latest pending status.
+    /// Destinations publish concurrently, with independent success and error state.
+    func update(_ status: LocationStatus) async {
         pending = status
         guard !isSending else { return }
         isSending = true
@@ -31,16 +32,23 @@ final class StatusEngine {
         defer { lease.end() }
         while let next = pending {
             pending = nil
-            guard next != lastSentStatus else { continue }
-            do {
-                try await client.setStatus(text: next.text, emoji: next.emoji)
-                defaults.set(["text": next.text, "emoji": next.emoji], forKey: Self.lastStatusKey)
-                lastSentStatus = next
-                lastError = nil
-            } catch {
-                lastError = error.localizedDescription
-                // A later event can retry a failed status; failures do not enter the dedupe cache.
+            let tasks = registry.enabledDestinations.map { destination in
+                Task { @MainActor in
+                    guard destination.isConfigured else { return }
+                    guard self.lastSentStatuses[destination.id] != next else { return }
+                    do {
+                        try await destination.publish(next)
+                        self.lastSentStatuses[destination.id] = next
+                        self.lastErrors[destination.id] = nil
+                        if let data = try? JSONEncoder().encode(self.lastSentStatuses) {
+                            self.defaults.set(data, forKey: Self.lastStatusKey)
+                        }
+                    } catch {
+                        self.lastErrors[destination.id] = error.localizedDescription
+                    }
+                }
             }
+            for task in tasks { await task.value }
         }
     }
 }
@@ -50,7 +58,7 @@ private final class BackgroundLease {
     private var identifier: UIBackgroundTaskIdentifier = .invalid
 
     init() {
-        identifier = UIApplication.shared.beginBackgroundTask(withName: "Update Slack status") { [weak self] in
+        identifier = UIApplication.shared.beginBackgroundTask(withName: "Update location status") { [weak self] in
             self?.end()
         }
     }

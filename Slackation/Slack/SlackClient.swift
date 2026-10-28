@@ -1,9 +1,5 @@
 import Foundation
 
-protocol SlackStatusSetting {
-    func setStatus(text: String, emoji: String) async throws
-}
-
 struct SlackIdentity: Equatable, Sendable {
     let user: String
     let team: String
@@ -33,7 +29,7 @@ enum SlackClientError: Error, Equatable, LocalizedError {
     }
 }
 
-struct SlackClient: SlackStatusSetting {
+struct SlackClient {
     private let session: URLSession
     private let tokenProvider: () throws -> String?
     private let sleep: (TimeInterval) async throws -> Void

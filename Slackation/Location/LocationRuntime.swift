@@ -8,10 +8,13 @@ final class LocationRuntime {
     static let shared = LocationRuntime()
     let store = GeofenceStore()
     let monitor = LocationMonitor()
-    let engine = StatusEngine(client: SlackClient())
+    let destinations: DestinationRegistry
+    let engine: StatusEngine
     private(set) var storageError: String?
 
     private init() {
+        destinations = DestinationRegistry(destinations: [SlackDestination()])
+        engine = StatusEngine(registry: destinations)
         monitor.onStatusChange = { [weak self] status in
             guard let self else { return }
             Task { await self.engine.update(status) }

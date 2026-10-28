@@ -7,7 +7,7 @@ final class LocationTests: XCTestCase {
         let small = place(radius: 100, text: "Desk")
         let other = OtherStatus()
         XCTAssertEqual(StatusResolver.resolve(geofences: [large, small], insideIDs: [], other: other),
-                       ResolvedStatus(text: other.text, emoji: other.emoji))
+                       LocationStatus(locationName: "Other", text: other.text, emoji: other.emoji, isOther: true))
         XCTAssertEqual(StatusResolver.resolve(geofences: [large, small], insideIDs: [large.id], other: other).text, "Office")
         XCTAssertEqual(StatusResolver.resolve(geofences: [large, small], insideIDs: [large.id, small.id], other: other).text, "Desk")
     }
@@ -22,43 +22,43 @@ final class LocationTests: XCTestCase {
 
     @MainActor
     func testEngineDedupeAndChanges() async {
-        let client = FakeSlack()
-        let engine = StatusEngine(client: client, defaults: isolatedDefaults())
-        let first = ResolvedStatus(text: "Office", emoji: ":office:")
-        let second = ResolvedStatus(text: "Other", emoji: ":earth_africa:")
+        let client = FakeDestination()
+        let engine = StatusEngine(registry: DestinationRegistry(destinations: [client], defaults: isolatedDefaults()), defaults: isolatedDefaults())
+        let first = LocationStatus(locationName: "Other", text: "Office", emoji: ":office:", isOther: true)
+        let second = LocationStatus(locationName: "Other", text: "Other", emoji: ":earth_africa:", isOther: true)
         await engine.update(first)
         await engine.update(first)
         await engine.update(second)
         await engine.update(second)
         XCTAssertEqual(client.calls, [first, second])
-        XCTAssertEqual(engine.lastSentStatus, second)
-        XCTAssertNil(engine.lastError)
+        XCTAssertEqual(engine.lastSentStatuses[client.id], second)
+        XCTAssertNil(engine.lastErrors[client.id])
     }
 
     @MainActor
     func testFailureIsKeptAndCanRetry() async {
-        let client = FakeSlack()
-        let engine = StatusEngine(client: client, defaults: isolatedDefaults())
-        let status = ResolvedStatus(text: "Office", emoji: ":office:")
+        let client = FakeDestination()
+        let engine = StatusEngine(registry: DestinationRegistry(destinations: [client], defaults: isolatedDefaults()), defaults: isolatedDefaults())
+        let status = LocationStatus(locationName: "Other", text: "Office", emoji: ":office:", isOther: true)
         client.shouldFail = true
         await engine.update(status)
-        XCTAssertNotNil(engine.lastError)
-        XCTAssertNil(engine.lastSentStatus)
+        XCTAssertNotNil(engine.lastErrors[client.id])
+        XCTAssertNil(engine.lastSentStatuses[client.id])
         client.shouldFail = false
         await engine.update(status)
         XCTAssertEqual(client.calls, [status, status])
-        XCTAssertEqual(engine.lastSentStatus, status)
-        XCTAssertNil(engine.lastError)
+        XCTAssertEqual(engine.lastSentStatuses[client.id], status)
+        XCTAssertNil(engine.lastErrors[client.id])
     }
 
     @MainActor
     func testConcurrentEventsSendLatestAfterInFlightRequest() async {
-        let client = FakeSlack()
+        let client = FakeDestination()
         client.pauseNext = true
-        let engine = StatusEngine(client: client, defaults: isolatedDefaults())
-        let a = ResolvedStatus(text: "A", emoji: ":a:")
-        let b = ResolvedStatus(text: "B", emoji: ":b:")
-        let c = ResolvedStatus(text: "C", emoji: ":c:")
+        let engine = StatusEngine(registry: DestinationRegistry(destinations: [client], defaults: isolatedDefaults()), defaults: isolatedDefaults())
+        let a = LocationStatus(locationName: "Other", text: "A", emoji: ":a:", isOther: true)
+        let b = LocationStatus(locationName: "Other", text: "B", emoji: ":b:", isOther: true)
+        let c = LocationStatus(locationName: "Other", text: "C", emoji: ":c:", isOther: true)
         let first = Task { await engine.update(a) }
         while client.resume == nil { await Task.yield() }
         await engine.update(b)
@@ -66,20 +66,20 @@ final class LocationTests: XCTestCase {
         client.resume?.resume()
         await first.value
         XCTAssertEqual(client.calls, [a, c])
-        XCTAssertEqual(engine.lastSentStatus, c)
+        XCTAssertEqual(engine.lastSentStatuses[client.id], c)
     }
 
     @MainActor
     func testSuccessfulStatusSurvivesEngineRecreation() async {
         let defaults = isolatedDefaults()
-        let client = FakeSlack()
-        let status = ResolvedStatus(text: "Office", emoji: ":office:")
-        await StatusEngine(client: client, defaults: defaults).update(status)
-        let recreated = StatusEngine(client: client, defaults: defaults)
-        XCTAssertEqual(recreated.lastSentStatus, status)
+        let client = FakeDestination()
+        let status = LocationStatus(locationName: "Other", text: "Office", emoji: ":office:", isOther: true)
+        await StatusEngine(registry: DestinationRegistry(destinations: [client], defaults: isolatedDefaults()), defaults: defaults).update(status)
+        let recreated = StatusEngine(registry: DestinationRegistry(destinations: [client], defaults: isolatedDefaults()), defaults: defaults)
+        XCTAssertEqual(recreated.lastSentStatuses[client.id], status)
         await recreated.update(status)
         XCTAssertEqual(client.calls, [status])
-        let changed = ResolvedStatus(text: "Other", emoji: ":earth_africa:")
+        let changed = LocationStatus(locationName: "Other", text: "Other", emoji: ":earth_africa:", isOther: true)
         await recreated.update(changed)
         XCTAssertEqual(client.calls, [status, changed])
     }
@@ -87,12 +87,12 @@ final class LocationTests: XCTestCase {
     @MainActor
     func testFailedStatusIsNotRestoredAfterEngineRecreation() async {
         let defaults = isolatedDefaults()
-        let client = FakeSlack()
+        let client = FakeDestination()
         client.shouldFail = true
-        let status = ResolvedStatus(text: "Office", emoji: ":office:")
-        await StatusEngine(client: client, defaults: defaults).update(status)
-        let recreated = StatusEngine(client: client, defaults: defaults)
-        XCTAssertNil(recreated.lastSentStatus)
+        let status = LocationStatus(locationName: "Other", text: "Office", emoji: ":office:", isOther: true)
+        await StatusEngine(registry: DestinationRegistry(destinations: [client], defaults: isolatedDefaults()), defaults: defaults).update(status)
+        let recreated = StatusEngine(registry: DestinationRegistry(destinations: [client], defaults: isolatedDefaults()), defaults: defaults)
+        XCTAssertNil(recreated.lastSentStatuses[client.id])
         client.shouldFail = false
         await recreated.update(status)
         XCTAssertEqual(client.calls, [status, status])
@@ -111,14 +111,18 @@ final class LocationTests: XCTestCase {
     }
 }
 
-private final class FakeSlack: SlackStatusSetting {
-    var calls: [ResolvedStatus] = []
+@MainActor
+private final class FakeDestination: StatusDestination {
+    let id = "test"
+    let displayName = "Test"
+    var isConfigured = true
+    var calls: [LocationStatus] = []
     var shouldFail = false
     var pauseNext = false
     var resume: CheckedContinuation<Void, Never>?
 
-    func setStatus(text: String, emoji: String) async throws {
-        calls.append(ResolvedStatus(text: text, emoji: emoji))
+    func publish(_ status: LocationStatus) async throws {
+        calls.append(status)
         if pauseNext {
             pauseNext = false
             await withCheckedContinuation { resume = $0 }
