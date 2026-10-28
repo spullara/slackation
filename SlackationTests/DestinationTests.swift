@@ -101,9 +101,10 @@ private final class TestDestination: StatusDestination {
     var resume: CheckedContinuation<Void, Never>?
     var calls: [LocationStatus] = []
     init(id: String) { self.id = id }
-    func publish(_ status: LocationStatus) async throws {
+    func publish(_ status: LocationStatus) async throws -> PublishOutcome {
         calls.append(status)
         if pause { await withCheckedContinuation { resume = $0 } }
         if shouldFail { throw NSError(domain: "test", code: 1) }
+        return .sent
     }
 }

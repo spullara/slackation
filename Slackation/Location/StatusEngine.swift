@@ -39,10 +39,12 @@ final class StatusEngine {
                     guard destination.isConfigured else { return }
                     guard self.lastSentStatuses[destination.id] != next else { return }
                     do {
-                        try await destination.publish(next)
+                        let outcome = try await destination.publish(next)
                         self.lastSentStatuses[destination.id] = next
-                        self.lastSentDates[destination.id] = Date()
-                        self.defaults.set(self.lastSentDates, forKey: "Slackation.destinationStatusDates")
+                        if case .sent = outcome {
+                            self.lastSentDates[destination.id] = Date()
+                            self.defaults.set(self.lastSentDates, forKey: "Slackation.destinationStatusDates")
+                        }
                         self.lastErrors[destination.id] = nil
                         if let data = try? JSONEncoder().encode(self.lastSentStatuses) {
                             self.defaults.set(data, forKey: Self.lastStatusKey)

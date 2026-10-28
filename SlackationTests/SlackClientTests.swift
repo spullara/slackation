@@ -147,7 +147,7 @@ final class SlackClientTests: XCTestCase {
     }
 
     @MainActor
-    func testDestinationDedupesPayloadAcrossMetadataChangesAndRecreation() async {
+    func testDestinationDedupesPayloadAcrossMetadataChangesAndRecreation() async throws {
         let suite = "SlackDestinationTests." + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -166,7 +166,9 @@ final class SlackClientTests: XCTestCase {
         b.locationName = "B"
         let first = engine()
         await first.update(a)
+        let firstSentDate = try XCTUnwrap(first.lastSentDates["slack"])
         await first.update(b)
+        XCTAssertEqual(first.lastSentDates["slack"], firstSentDate, "Metadata changes do not send a payload")
         XCTAssertEqual(requests, 1)
         XCTAssertEqual(first.lastSentStatuses["slack"], b)
         let recreated = engine()
@@ -176,14 +178,21 @@ final class SlackClientTests: XCTestCase {
         await recreated.update(other)
         XCTAssertEqual(requests, 1)
         XCTAssertEqual(recreated.lastSentStatuses["slack"], other)
+        XCTAssertEqual(recreated.lastSentDates["slack"], firstSentDate, "A duplicate preserves the saved send time")
         var changed = other
         changed.text = "Away"
         fail = true
         await recreated.update(changed)
         XCTAssertEqual(requests, 2)
         XCTAssertNotNil(recreated.lastErrors["slack"])
+        XCTAssertEqual(recreated.lastSentDates["slack"], firstSentDate, "Failure does not advance the send time")
+        XCTAssertEqual(engine().lastSentDates["slack"], firstSentDate)
         fail = false
-        await engine().update(changed)
+        let retry = engine()
+        await retry.update(changed)
+        let retrySentDate = try XCTUnwrap(retry.lastSentDates["slack"])
+        XCTAssertGreaterThan(retrySentDate, firstSentDate, "A real successful send advances the time")
+        XCTAssertEqual(engine().lastSentDates["slack"], retrySentDate)
         XCTAssertEqual(requests, 3, "A failed payload must remain eligible after recreation")
         await engine().update(a)
         XCTAssertEqual(requests, 4, "Returning to an older payload must publish again")

@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Slackation uses your location to select your Slack status.</string>
+	<string>Your location selects the status sent to your enabled destinations.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Slackation uses your location in the background to update your Slack status when you enter or leave a place.</string>
+	<string>Your location updates your status when you enter or leave a place, even when the app is closed.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>

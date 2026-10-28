@@ -20,15 +20,17 @@ struct SlackDestination: StatusDestination {
         return !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    func publish(_ status: LocationStatus) async throws {
+    func publish(_ status: LocationStatus) async throws -> PublishOutcome {
         // Compare only the fields Slack receives; generic metadata remains in the engine.
         let legacyKey = "Slackation.lastSuccessfulStatus"
         let payloadKey = "Slackation.slackSuccessfulPayload"
         let saved = defaults.dictionary(forKey: payloadKey) ?? defaults.dictionary(forKey: legacyKey)
-        if saved?["text"] as? String != status.text || saved?["emoji"] as? String != status.emoji {
+        let isDuplicate = saved?["text"] as? String == status.text && saved?["emoji"] as? String == status.emoji
+        if !isDuplicate {
             try await client.setStatus(text: status.text, emoji: status.emoji)
         }
         defaults.set(["text": status.text, "emoji": status.emoji], forKey: payloadKey)
         defaults.removeObject(forKey: legacyKey)
+        return isDuplicate ? .skippedDuplicate : .sent
     }
 }

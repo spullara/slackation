@@ -121,12 +121,13 @@ private final class FakeDestination: StatusDestination {
     var pauseNext = false
     var resume: CheckedContinuation<Void, Never>?
 
-    func publish(_ status: LocationStatus) async throws {
+    func publish(_ status: LocationStatus) async throws -> PublishOutcome {
         calls.append(status)
         if pauseNext {
             pauseNext = false
             await withCheckedContinuation { resume = $0 }
         }
         if shouldFail { throw NSError(domain: "Test", code: 1) }
+        return .sent
     }
 }
