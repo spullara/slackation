@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect width="1024" height="1024" fill="#182C40"/>
+  <!-- A place pin containing a conversation. -->
+  <path d="M512 172c-158 0-276 117-276 266 0 186 276 414 276 414s276-228 276-414c0-149-118-266-276-266Z" fill="#F5F1E8"/>
+  <path d="M390 328h244c27 0 48 21 48 48v130c0 27-21 48-48 48H500l-94 65v-65h-16c-27 0-48-21-48-48V376c0-27 21-48 48-48Z" fill="#182C40"/>
+  <path d="M411 414h202M411 472h126" fill="none" stroke="#F5F1E8" stroke-width="26" stroke-linecap="round"/>
+</svg>

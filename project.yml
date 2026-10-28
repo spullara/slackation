@@ -14,10 +14,13 @@ targets:
     sources: [Slackation]
     settings:
       base:
+        TARGETED_DEVICE_FAMILY: '1'
+        APP_DISPLAY_NAME: Slackation
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         PRODUCT_BUNDLE_IDENTIFIER: com.slackation.app
         INFOPLIST_FILE: Slackation/Info.plist
         GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
   SlackationTests:
     type: bundle.unit-test
