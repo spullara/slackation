@@ -6,6 +6,11 @@ import Observation
 final class LocationMonitor: NSObject, @preconcurrency CLLocationManagerDelegate {
     private(set) var authorizationStatus: CLAuthorizationStatus
     private(set) var lastError: String?
+    private(set) var currentLocation: CLLocation?
+    private(set) var locationError: String?
+    private(set) var isLocating = false
+    private var locationRequested = false
+    private let locationKey = "Whereabouts.lastLocation"
     private(set) var insideIDs: Set<UUID> = []
     var onStatusChange: ((LocationStatus) -> Void)?
     private let manager: CLLocationManager
@@ -19,6 +24,33 @@ final class LocationMonitor: NSObject, @preconcurrency CLLocationManagerDelegate
         authorizationStatus = manager.authorizationStatus
         super.init()
         manager.delegate = self
+        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        currentLocation = manager.location
+        if currentLocation == nil,
+           let saved = UserDefaults.standard.array(forKey: locationKey) as? [Double], saved.count == 2 {
+            let coordinate = CLLocationCoordinate2D(latitude: saved[0], longitude: saved[1])
+            if CLLocationCoordinate2DIsValid(coordinate) {
+                currentLocation = CLLocation(latitude: saved[0], longitude: saved[1])
+            }
+        }
+    }
+
+    /// A one-shot foreground request. Cached coordinates remain available if it fails.
+    func requestCurrentLocation() {
+        locationError = nil
+        locationRequested = true
+        switch authorizationStatus {
+        case .notDetermined:
+            isLocating = true
+            manager.requestWhenInUseAuthorization()
+        case .authorizedAlways, .authorizedWhenInUse:
+            isLocating = true
+            manager.requestLocation()
+        default:
+            isLocating = false
+            locationRequested = false
+            locationError = "Location access is disabled. Open Settings to allow access."
+        }
     }
 
     func requestAlwaysAuthorization() {
@@ -89,6 +121,16 @@ final class LocationMonitor: NSObject, @preconcurrency CLLocationManagerDelegate
             lastError = "Location access is disabled. Enable Always access in Settings for background updates."
         }
         registerRegions()
+        if locationRequested { requestCurrentLocation() }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let location = locations.last(where: { $0.horizontalAccuracy >= 0 && CLLocationCoordinate2DIsValid($0.coordinate) }) else { return }
+        currentLocation = location
+        UserDefaults.standard.set([location.coordinate.latitude, location.coordinate.longitude], forKey: locationKey)
+        isLocating = false
+        locationRequested = false
+        locationError = nil
     }
 
     func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) { update(region, inside: true) }
@@ -99,5 +141,11 @@ final class LocationMonitor: NSObject, @preconcurrency CLLocationManagerDelegate
     }
     func locationManager(_ manager: CLLocationManager, didStartMonitoringFor region: CLRegion) { manager.requestState(for: region) }
     func locationManager(_ manager: CLLocationManager, monitoringDidFailFor region: CLRegion?, withError error: Error) { lastError = error.localizedDescription }
-    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) { lastError = error.localizedDescription }
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        if locationRequested {
+            locationError = "Could not get your location. Try again or choose a point on the map."
+            locationRequested = false
+            isLocating = false
+        } else { lastError = error.localizedDescription }
+    }
 }

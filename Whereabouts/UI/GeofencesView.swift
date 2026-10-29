@@ -37,7 +37,8 @@ struct GeofencesView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Add geofence", systemImage: "plus") {
-                        editing = Geofence(name: "", latitude: 37.3349, longitude: -122.0090,
+                        let coordinate = runtime.monitor.currentLocation?.coordinate
+                        editing = Geofence(name: "", latitude: coordinate?.latitude ?? 0, longitude: coordinate?.longitude ?? 0,
                                            radius: 200, statusText: "", statusEmoji: ":office:")
                     }.disabled(runtime.store.geofences.count >= GeofenceStore.maximumGeofences)
                 }
@@ -63,6 +64,9 @@ struct GeofenceEditor: View {
     @State private var query = ""
     @State private var results: [MKMapItem] = []
     @State private var searching = false
+    @State private var useNextLocation = false
+    @State private var initialized = false
+    @Environment(\.openURL) private var openURL
     @State private var error: String?
     @Environment(\.dismiss) private var dismiss
     private var center: CLLocationCoordinate2D {
@@ -98,6 +102,7 @@ struct GeofenceEditor: View {
                 }
                 MapReader { proxy in
                     Map(position: $camera) {
+                        UserAnnotation()
                         MapCircle(center: center, radius: place.radius)
                             .foregroundStyle(Color.accentColor.opacity(0.18))
                             .stroke(Color.accentColor, lineWidth: 2)
@@ -109,9 +114,25 @@ struct GeofenceEditor: View {
                     .frame(height: 260)
                     .accessibilityLabel("Geofence map. Tap to set the center.")
                 }
+                Button {
+                    useNextLocation = true
+                    if let location = runtime.monitor.currentLocation { setCenter(location.coordinate, userSelected: false) }
+                    runtime.monitor.requestCurrentLocation()
+                } label: {
+                    Label("Use current location", systemImage: "location.fill")
+                }
+                if runtime.monitor.isLocating { ProgressView("Get current location") }
+                if let message = runtime.monitor.locationError {
+                    Text(message).font(.caption).foregroundStyle(.secondary)
+                }
+                if runtime.monitor.authorizationStatus == .denied || runtime.monitor.authorizationStatus == .restricted {
+                    Text("Location access is disabled. Choose a point on the map or allow access in Settings.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Open Settings") { openURL(URL(string: UIApplication.openSettingsURLString)!) }
+                }
                 Text("Tap the map or search to set the center.").font(.caption).foregroundStyle(.secondary)
                 Text("\(place.latitude, specifier: "%.5f"), \(place.longitude, specifier: "%.5f")")
-                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary).accessibilityIdentifier("geofenceCoordinates")
                 LabeledContent("Radius", value: "\(Int(place.radius)) m")
                 Slider(value: $place.radius, in: 100...2000, step: 50).accessibilityLabel("Radius")
             }
@@ -123,7 +144,21 @@ struct GeofenceEditor: View {
             }
         }.navigationTitle(runtime.store.geofences.contains(where: { $0.id == place.id }) ? "Edit geofence" : "New geofence")
             .navigationBarTitleDisplayMode(.inline)
-            .onAppear { frameCenter() }
+            .onAppear {
+                guard !initialized else { return }
+                initialized = true
+                frameCenter()
+                if !runtime.store.geofences.contains(where: { $0.id == place.id }) {
+                    useNextLocation = true
+                    runtime.monitor.requestCurrentLocation()
+                }
+            }
+            .onChange(of: runtime.monitor.currentLocation) { _, location in
+                if useNextLocation, let location {
+                    setCenter(location.coordinate, userSelected: false)
+                    useNextLocation = false
+                }
+            }
             .alert("Geofence", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
                 Button("OK", role: .cancel) { error = nil }
             } message: { Text(error ?? "") }
@@ -138,7 +173,8 @@ struct GeofenceEditor: View {
         camera = .region(MKCoordinateRegion(center: center, latitudinalMeters: max(1200, place.radius * 3),
                                             longitudinalMeters: max(1200, place.radius * 3)))
     }
-    private func setCenter(_ coordinate: CLLocationCoordinate2D) {
+    private func setCenter(_ coordinate: CLLocationCoordinate2D, userSelected: Bool = true) {
+        if userSelected { useNextLocation = false }
         place.latitude = coordinate.latitude; place.longitude = coordinate.longitude
         frameCenter()
     }

@@ -47,6 +47,36 @@ final class AppFlowTests: XCTestCase {
         XCTAssertFalse(edited.exists)
     }
 
+    func testLocationDenied() throws {
+        guard ProcessInfo.processInfo.environment["EXPECT_LOCATION_DENIED"] == "1" else {
+            throw XCTSkip("Run after simctl privacy denies location.")
+        }
+        app.tabBars.buttons["Geofences"].tap()
+        app.buttons["Add geofence"].tap()
+        app.buttons["Use current location"].tap()
+        XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Location access is disabled. Choose a point on the map or allow access in Settings."].exists)
+        app.buttons["Cancel"].tap()
+    }
+
+    func testUseCurrentLocation() throws {
+        guard let expected = ProcessInfo.processInfo.environment["EXPECTED_COORDINATES"] else {
+            throw XCTSkip("Set EXPECTED_COORDINATES after simctl location.")
+        }
+        app.tabBars.buttons["Geofences"].tap()
+        app.buttons["Add geofence"].tap()
+        let coordinates = app.staticTexts["geofenceCoordinates"]
+        expectation(for: NSPredicate(format: "label == %@", expected), evaluatedWith: coordinates)
+        waitForExpectations(timeout: 15)
+        app.maps.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.6)).tap()
+        XCTAssertNotEqual(coordinates.label, expected)
+        app.buttons["Use current location"].tap()
+        expectation(for: NSPredicate(format: "label == %@", expected), evaluatedWith: coordinates)
+        waitForExpectations(timeout: 15)
+        capture("editor-current-location")
+        app.buttons["Cancel"].tap()
+    }
+
     func testScreensAndPlaceEditing() {
         app.tabBars.buttons["Destinations"].tap()
         XCTAssertTrue(app.switches["Send status"].exists)
