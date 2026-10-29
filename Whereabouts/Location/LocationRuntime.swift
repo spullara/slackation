@@ -7,6 +7,7 @@ import UIKit
 final class LocationRuntime {
     static let shared = LocationRuntime()
     let store = GeofenceStore()
+    let webhooks = WebhookStore()
     let monitor = LocationMonitor()
     let driving: DrivingMonitor
     let destinations: DestinationRegistry
@@ -36,10 +37,33 @@ final class LocationRuntime {
         do {
             try store.load()
             storageError = nil
-            refreshMonitoring()
         } catch {
             storageError = error.localizedDescription
+            return
         }
+        do {
+            try webhooks.load()
+            destinations.replaceWebhooks(webhooks.configurations, secrets: webhooks.secrets)
+        } catch {
+            storageError = "Could not load webhooks. " + error.localizedDescription
+        }
+        refreshMonitoring()
+    }
+
+    func saveWebhook(_ configuration: WebhookConfiguration, secret: String?) throws {
+        let previous = webhooks.configurations.first { $0.id == configuration.id }
+        try webhooks.save(configuration, secret: secret)
+        if previous?.url != configuration.url || secret != nil {
+            engine.invalidate(destinationID: configuration.destinationID)
+        }
+        destinations.replaceWebhooks(webhooks.configurations, secrets: webhooks.secrets)
+        refreshMonitoring()
+    }
+
+    func deleteWebhook(_ configuration: WebhookConfiguration) throws {
+        try webhooks.delete(configuration)
+        engine.invalidate(destinationID: configuration.destinationID)
+        destinations.replaceWebhooks(webhooks.configurations, secrets: webhooks.secrets)
     }
 
     /// UI calls this after a successful store save.

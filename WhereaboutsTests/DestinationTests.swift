@@ -32,6 +32,26 @@ final class DestinationTests: XCTestCase {
         XCTAssertEqual(second.calls.count, 1)
     }
 
+    func testInvalidationDiscardsAnOldInFlightResult() async {
+        let defaults = isolatedDefaults()
+        let destination = TestDestination(id: "edited")
+        destination.pause = true
+        let registry = DestinationRegistry(destinations: [destination], defaults: defaults)
+        let engine = StatusEngine(registry: registry, defaults: defaults)
+        let status = LocationStatus(locationName: "Other", text: "Away", emoji: "", isOther: true)
+        let task = Task { await engine.update(status) }
+        while destination.resume == nil { await Task.yield() }
+        engine.invalidate(destinationID: destination.id)
+        destination.resume?.resume()
+        await task.value
+        XCTAssertNil(engine.lastSentStatuses[destination.id])
+        XCTAssertNil(engine.lastSentDates[destination.id])
+        destination.pause = false
+        await engine.update(status)
+        XCTAssertEqual(destination.calls.count, 2)
+        XCTAssertEqual(engine.lastSentStatuses[destination.id], status)
+    }
+
     func testSlowDestinationDoesNotBlockAnother() async {
         let defaults = isolatedDefaults()
         let first = TestDestination(id: "slow")

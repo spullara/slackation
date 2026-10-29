@@ -1,6 +1,10 @@
 import Foundation
 
+enum StatusKind: String, Codable, Sendable { case geofence, driving, other }
+
 struct LocationStatus: Codable, Equatable, Sendable {
+    var kind: StatusKind
+    var geofenceID: UUID?
     var locationName: String
     var text: String
     var emoji: String
@@ -8,7 +12,9 @@ struct LocationStatus: Codable, Equatable, Sendable {
     var emojiUnicode: String?
     var displayEmoji: String { emojiUnicode ?? EmojiCatalog.unicode(for: emoji) ?? emoji }
 
-    init(locationName: String, text: String, emoji: String, isOther: Bool, emojiUnicode: String? = nil) {
+    init(locationName: String, text: String, emoji: String, isOther: Bool, emojiUnicode: String? = nil, kind: StatusKind? = nil, geofenceID: UUID? = nil) {
+        self.kind = kind ?? (isOther ? .other : .geofence)
+        self.geofenceID = geofenceID
         self.locationName = locationName
         self.text = text
         self.emoji = emoji
@@ -22,6 +28,8 @@ struct LocationStatus: Codable, Equatable, Sendable {
         text = try values.decode(String.self, forKey: .text)
         emoji = try values.decode(String.self, forKey: .emoji)
         isOther = try values.decode(Bool.self, forKey: .isOther)
+        kind = try values.decodeIfPresent(StatusKind.self, forKey: .kind) ?? (isOther ? .other : .geofence)
+        geofenceID = try values.decodeIfPresent(UUID.self, forKey: .geofenceID)
         emojiUnicode = try values.decodeIfPresent(String.self, forKey: .emojiUnicode) ?? EmojiCatalog.unicode(for: emoji)
     }
 }

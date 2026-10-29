@@ -8,6 +8,49 @@ final class AppFlowTests: XCTestCase {
         app.launch()
     }
 
+    func testWebhookEditingAndValidation() {
+        app.tabBars.buttons["Destinations"].tap()
+        let old = app.buttons["Example webhook"]
+        if old.exists { old.swipeLeft(); app.buttons["Delete"].tap() }
+        let oldEdited = app.buttons["Example webhook edited"]
+        if oldEdited.exists { oldEdited.swipeLeft(); app.buttons["Delete"].tap() }
+        app.buttons["Add webhook"].tap()
+        let name = app.textFields["webhookName"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        name.tap(); name.typeText("Example webhook")
+        let url = app.textFields["webhookURL"]
+        url.tap(); url.typeText("http://example.com/hook")
+        // Leave the fixture disabled so the UI test never sends a real request.
+        let toggle = app.switches["webhookEnabled"]
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        app.buttons["Save"].tap()
+        XCTAssertTrue(app.staticTexts["Enter an HTTPS URL without a username, password, or fragment."].waitForExistence(timeout: 5))
+        app.buttons["Cancel"].tap()
+        app.buttons["Add webhook"].tap()
+        name.tap(); name.typeText("Example webhook")
+        url.tap(); url.typeText("https://example.com/hook")
+        app.switches["webhookEnabled"].coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        app.buttons["Save"].tap()
+        XCTAssertTrue(app.buttons["Example webhook"].waitForExistence(timeout: 5))
+        capture("webhook-destinations")
+        app.terminate(); app.launch()
+        app.tabBars.buttons["Destinations"].tap()
+        app.buttons["Example webhook"].tap()
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        XCTAssertEqual(url.value as? String, "https://example.com/hook")
+        capture("webhook-editor")
+        name.tap(); name.typeText(" edited")
+        app.buttons["Save"].tap()
+        let edited = app.buttons["Example webhook edited"]
+        XCTAssertTrue(edited.waitForExistence(timeout: 5))
+        edited.swipeLeft()
+        app.buttons["Delete"].tap()
+        XCTAssertFalse(edited.exists)
+        app.terminate(); app.launch()
+        app.tabBars.buttons["Destinations"].tap()
+        XCTAssertFalse(app.buttons["Example webhook edited"].exists)
+    }
+
     func testDrivingSettingsAndHome() {
         app.terminate()
         app.launchArguments = ["--preview-driving"]

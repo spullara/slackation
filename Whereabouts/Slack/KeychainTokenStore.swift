@@ -56,6 +56,6 @@ struct KeychainTokenStore {
 
     struct StoreError: Error, LocalizedError {
         let status: OSStatus
-        var errorDescription: String? { "Could not access the Slack token in Keychain (\(status))." }
+        var errorDescription: String? { "Could not access the credential in Keychain (\(status))." }
     }
 }

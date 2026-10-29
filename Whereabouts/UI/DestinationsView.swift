@@ -2,30 +2,53 @@ import SwiftUI
 
 struct DestinationsView: View {
     let runtime: LocationRuntime
-    @State private var configuredIDs: Set<String> = []
+    @State private var hasSlackToken = false
+    @State private var editing: WebhookConfiguration?
+    @State private var error: String?
     var body: some View {
         List {
-            ForEach(runtime.destinations.destinations, id: \.id) { destination in
-                Section {
-                    NavigationLink {
-                        if destination.id == "slack" {
-                            SlackSetupView(runtime: runtime)
-                        } else {
-                            ContentUnavailableView("Setup unavailable", systemImage: "gear")
+            Section {
+                NavigationLink { SlackSetupView(runtime: runtime) } label: {
+                    Label("Slack", systemImage: "paperplane")
+                }
+                Toggle("Send status", isOn: Binding(
+                    get: { runtime.destinations.enabledIDs.contains("slack") },
+                    set: { runtime.destinations.setEnabled($0, for: "slack"); runtime.refreshMonitoring() }
+                ))
+                Text(hasSlackToken ? "Token saved" : "Setup required")
+                    .font(.caption).foregroundStyle(.secondary)
+            } footer: { Text("Choose where to send your location status.") }
+            Section("Webhooks") {
+                ForEach(runtime.webhooks.configurations) { webhook in
+                    VStack(alignment: .leading) {
+                        Button { editing = webhook } label: {
+                            Label(webhook.name, systemImage: "network")
                         }
-                    } label: {
-                        Label(destination.displayName, systemImage: "paperplane")
+                        Toggle("Send to \(webhook.name)", isOn: Binding(
+                            get: { webhook.enabled },
+                            set: { enabled in
+                                var updated = webhook
+                                updated.enabled = enabled
+                                do { try runtime.saveWebhook(updated, secret: nil) }
+                                catch { self.error = error.localizedDescription }
+                            }
+                        ))
                     }
-                    Toggle("Send status", isOn: Binding(
-                        get: { runtime.destinations.enabledIDs.contains(destination.id) },
-                        set: { runtime.destinations.setEnabled($0, for: destination.id); runtime.refreshMonitoring() }
-                    ))
-                    Text(configuredIDs.contains(destination.id) ? "Token saved" : "Setup required")
-                        .font(.caption).foregroundStyle(.secondary)
-                } footer: { Text("Choose where to send your location status.") }
+                    .swipeActions {
+                        Button("Delete", role: .destructive) {
+                            do { try runtime.deleteWebhook(webhook) }
+                            catch { self.error = error.localizedDescription }
+                        }
+                    }
+                }
+                Button("Add webhook", systemImage: "plus") { editing = WebhookConfiguration() }
             }
+            if let error { ErrorText(message: error) }
         }.navigationTitle("Destinations")
-            .onAppear { configuredIDs = Set(runtime.destinations.destinations.filter { $0.isConfigured }.map(\.id)) }
+            .onAppear { hasSlackToken = runtime.destinations.destinations.first { $0.id == "slack" }?.isConfigured == true }
+            .sheet(item: $editing) { configuration in
+                NavigationStack { WebhookEditor(runtime: runtime, configuration: configuration) }
+            }
     }
 }
 

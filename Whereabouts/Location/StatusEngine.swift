@@ -9,6 +9,7 @@ final class StatusEngine {
     private(set) var lastErrors: [String: String] = [:]
     private(set) var isSending = false
     private let registry: DestinationRegistry
+    private var revisions: [String: UUID] = [:]
     private var pending: LocationStatus?
     private let defaults: UserDefaults
     private static let lastStatusKey = "Whereabouts.destinationStatuses"
@@ -20,6 +21,17 @@ final class StatusEngine {
         if let data = defaults.data(forKey: Self.lastStatusKey),
            let saved = try? JSONDecoder().decode([String: LocationStatus].self, from: data) {
             lastSentStatuses = saved
+        }
+    }
+
+    func invalidate(destinationID: String) {
+        revisions[destinationID] = UUID()
+        lastSentStatuses[destinationID] = nil
+        lastSentDates[destinationID] = nil
+        lastErrors[destinationID] = nil
+        defaults.set(lastSentDates, forKey: "Whereabouts.destinationStatusDates")
+        if let data = try? JSONEncoder().encode(lastSentStatuses) {
+            defaults.set(data, forKey: Self.lastStatusKey)
         }
     }
 
@@ -35,11 +47,14 @@ final class StatusEngine {
         while let next = pending {
             pending = nil
             let tasks = registry.enabledDestinations.map { destination in
-                Task { @MainActor in
-                    guard destination.isConfigured else { return }
+                let revision = revisions[destination.id]
+                return Task { @MainActor in
+                    guard self.revisions[destination.id] == revision,
+                          self.registry.enabledIDs.contains(destination.id), destination.isConfigured else { return }
                     guard self.lastSentStatuses[destination.id] != next else { return }
                     do {
                         let outcome = try await destination.publish(next)
+                        guard self.revisions[destination.id] == revision else { return }
                         self.lastSentStatuses[destination.id] = next
                         if case .sent = outcome {
                             self.lastSentDates[destination.id] = Date()
@@ -50,6 +65,7 @@ final class StatusEngine {
                             self.defaults.set(data, forKey: Self.lastStatusKey)
                         }
                     } catch {
+                        guard self.revisions[destination.id] == revision else { return }
                         self.lastErrors[destination.id] = error.localizedDescription
                     }
                 }

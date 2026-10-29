@@ -4,7 +4,7 @@ import Observation
 @MainActor
 @Observable
 final class DestinationRegistry {
-    let destinations: [any StatusDestination]
+    private(set) var destinations: [any StatusDestination]
     private(set) var enabledIDs: Set<String>
     private let defaults: UserDefaults
     private static let settingsKey = "Whereabouts.enabledDestinations"
@@ -18,6 +18,16 @@ final class DestinationRegistry {
 
     var enabledDestinations: [any StatusDestination] {
         destinations.filter { enabledIDs.contains($0.id) }
+    }
+
+    func replaceWebhooks(_ webhooks: [WebhookConfiguration], secrets: any WebhookSecretStore) {
+        destinations.removeAll { $0 is WebhookDestination }
+        enabledIDs = enabledIDs.filter { !$0.hasPrefix("webhook.") }
+        for webhook in webhooks {
+            destinations.append(WebhookDestination(configuration: webhook, secrets: secrets))
+            if webhook.enabled { enabledIDs.insert(webhook.destinationID) }
+        }
+        defaults.set(enabledIDs.sorted(), forKey: Self.settingsKey)
     }
 
     func setEnabled(_ enabled: Bool, for id: String) {
