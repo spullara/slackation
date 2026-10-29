@@ -159,6 +159,113 @@ final class DrivingTests: XCTestCase {
     }
 
     @MainActor
+    func testRegionExitWaitsForHistoryStartedByEnablingDriving() async throws {
+        let source = FakeMotionSource()
+        let motion = DrivingMonitor(source: source, defaults: defaults())
+        motion.setEnabled(false)
+        let (runtime, destination, region) = try runtime(motion: motion)
+        runtime.monitor.locationManager(CLLocationManager(), didEnterRegion: region)
+        await waitUntil { runtime.engine.lastSentStatuses[destination.id]?.locationName == "Office" }
+        for _ in 0..<100 { await Task.yield() }
+
+        source.pauseHistory = true
+        motion.setEnabled(true)
+        await waitUntil { source.resume != nil }
+        let queries = source.queries
+        runtime.monitor.locationManager(CLLocationManager(), didExitRegion: region)
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertEqual(source.queries, queries, "Exit must share the active query.")
+        XCTAssertEqual(destination.calls.map(\.locationName), ["Office"])
+        source.pauseHistory = false
+        source.resume?.resume(returning: [
+            MotionSample(date: Date(), activity: .automotive, confidence: .high)
+        ])
+        await waitUntil { runtime.engine.lastSentStatuses[destination.id]?.locationName == "Driving" }
+        XCTAssertEqual(destination.calls.map(\.locationName), ["Office", "Driving"])
+        motion.setEnabled(false)
+    }
+
+    @MainActor
+    func testFailedSharedHistoryKeepsKnownDrivingAndReleasesCallers() async {
+        let source = FakeMotionSource()
+        let motion = DrivingMonitor(source: source, defaults: defaults())
+        await motion.refresh()
+        source.receive?([MotionSample(date: Date(), activity: .automotive, confidence: .high)])
+        XCTAssertTrue(motion.isDriving)
+        source.pauseHistory = true
+        source.shouldThrow = true
+        let first = Task { await motion.refresh() }
+        await waitUntil { source.resume != nil }
+        var secondFinished = false
+        let second = Task { await motion.refresh(); secondFinished = true }
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertFalse(secondFinished)
+        XCTAssertEqual(source.queries, 2)
+        source.pauseHistory = false
+        source.resume?.resume(returning: [])
+        await first.value
+        await second.value
+        XCTAssertTrue(motion.isDriving)
+        XCTAssertNotNil(motion.issue)
+        source.shouldThrow = false
+        await motion.refresh()
+        XCTAssertEqual(source.queries, 3, "A failed query must not block future refreshes.")
+        motion.setEnabled(false)
+    }
+
+    @MainActor
+    func testDisableReleasesSharedHistoryWaiterAndRejectsLateResult() async {
+        let source = FakeMotionSource()
+        source.pauseHistory = true
+        let motion = DrivingMonitor(source: source, defaults: defaults())
+        let first = Task { await motion.refresh() }
+        await waitUntil { source.resume != nil }
+        var secondFinished = false
+        let second = Task { await motion.refresh(); secondFinished = true }
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertFalse(secondFinished)
+        motion.setEnabled(false)
+        await waitUntil { secondFinished }
+        source.resume?.resume(returning: [
+            MotionSample(date: Date(), activity: .automotive, confidence: .high)
+        ])
+        await first.value
+        await second.value
+        XCTAssertFalse(motion.isDriving)
+        XCTAssertFalse(motion.isMonitoring)
+    }
+
+    @MainActor
+    func testMotionChangeDuringSlowSendPublishesFinalStateInOrder() async throws {
+        let source = FakeMotionSource()
+        let motion = DrivingMonitor(source: source, defaults: defaults())
+        let (runtime, destination, _) = try runtime(motion: motion)
+        runtime.monitor.configure(geofences: [], other: OtherStatus())
+        runtime.monitor.onMotionWake?()
+        await waitUntil { runtime.engine.lastSentStatuses[destination.id]?.locationName == "Other" }
+        for _ in 0..<100 { await Task.yield() }
+
+        source.pauseHistory = true
+        runtime.monitor.onMotionWake?()
+        await waitUntil { source.resume != nil }
+        destination.pauseNext = true
+        source.pauseHistory = false
+        source.resume?.resume(returning: [
+            MotionSample(date: Date().addingTimeInterval(-180), activity: .automotive, confidence: .high)
+        ])
+        await waitUntil { destination.resume != nil }
+        XCTAssertEqual(destination.calls.map(\.locationName), ["Other", "Driving"])
+        source.receive?([MotionSample(date: Date().addingTimeInterval(-121), activity: .stopped, confidence: .high)])
+        XCTAssertFalse(motion.isDriving)
+        destination.resume?.resume()
+        await waitUntil { !runtime.engine.isSending && destination.calls.count == 3 }
+        XCTAssertEqual(destination.calls.map(\.locationName), ["Other", "Driving", "Other"])
+        XCTAssertEqual(runtime.engine.lastSentStatuses[destination.id]?.locationName, "Other")
+        XCTAssertEqual(runtime.currentStatus.locationName, "Other")
+        motion.setEnabled(false)
+    }
+
+    @MainActor
     private func runtime(motion: DrivingMonitor) throws -> (LocationRuntime, RecordingDestination, CLCircularRegion) {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
@@ -176,10 +283,10 @@ final class DrivingTests: XCTestCase {
     }
 
     @MainActor
-    private func waitUntil(_ condition: () -> Bool) async {
+    private func waitUntil(file: StaticString = #filePath, line: UInt = #line, _ condition: () -> Bool) async {
         let deadline = Date().addingTimeInterval(3)
-        while !condition() && Date() < deadline { await Task.yield() }
-        XCTAssertTrue(condition(), "Expected asynchronous status update.")
+        while !condition() && Date() < deadline { try? await Task.sleep(for: .milliseconds(1)) }
+        XCTAssertTrue(condition(), "Expected asynchronous status update.", file: file, line: line)
     }
 
     private func defaults() -> UserDefaults {
@@ -198,13 +305,17 @@ private final class FakeMotionSource: MotionActivitySource {
     var stops = 0
     var queries = 0
     var pauseHistory = false
+    var shouldThrow = false
     var resume: CheckedContinuation<[MotionSample], Never>?
     func start(_ receive: @escaping ([MotionSample]) -> Void) { self.receive = receive }
     func stop() { stops += 1 }
     func history(from: Date, to: Date) async throws -> [MotionSample] {
         queries += 1
-        if pauseHistory { return await withCheckedContinuation { resume = $0 } }
-        return []
+        let samples: [MotionSample]
+        if pauseHistory { samples = await withCheckedContinuation { resume = $0 } }
+        else { samples = [] }
+        if shouldThrow { throw NSError(domain: "MotionTest", code: 1) }
+        return samples
     }
 }
 
@@ -215,8 +326,14 @@ private final class RecordingDestination: StatusDestination {
     let displayName = "Test"
     var isConfigured = true
     var calls: [LocationStatus] = []
+    var pauseNext = false
+    var resume: CheckedContinuation<Void, Never>?
     func publish(_ status: LocationStatus) async throws -> PublishOutcome {
         calls.append(status)
+        if pauseNext {
+            pauseNext = false
+            await withCheckedContinuation { self.resume = $0 }
+        }
         return .sent
     }
 }

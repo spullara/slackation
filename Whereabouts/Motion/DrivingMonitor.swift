@@ -53,6 +53,7 @@ final class DrivingMonitor {
     private var timer: Timer?
     private var generation = 0
     private var querying = false
+    private var refreshWaiters: [CheckedContinuation<Void, Never>] = []
     private var buffered: [MotionSample] = []
     private let preview: Bool
 
@@ -114,29 +115,42 @@ final class DrivingMonitor {
 
     func refresh() async {
         start()
-        guard isMonitoring, !querying else { return }
+        guard isMonitoring else { return }
+        if querying {
+            // Region exits must resolve only after the active history query finishes.
+            await withCheckedContinuation { refreshWaiters.append($0) }
+            return
+        }
         let lease = BackgroundLease()
         defer { lease.end() }
         querying = true
         let token = generation
+        defer {
+            if generation == token { finishRefresh() }
+        }
         let now = Date()
         let from = max(detector.lastSampleDate ?? now.addingTimeInterval(-86400), now.addingTimeInterval(-86400))
         do {
             let samples = try await source.history(from: from, to: now)
             guard generation == token, isMonitoring else { return }
-            querying = false
             let all = samples + buffered
             buffered = []
             consume(all)
         } catch {
             guard generation == token, isMonitoring else { return }
-            querying = false
             if source.denied { start() }
             else { issue = "Could not read motion activity. The app will try again." }
             let samples = buffered
             buffered = []
             if isMonitoring { consume(samples) }
         }
+    }
+
+    private func finishRefresh() {
+        querying = false
+        let waiters = refreshWaiters
+        refreshWaiters = []
+        for waiter in waiters { waiter.resume() }
     }
 
     private func consume(_ samples: [MotionSample]) {
@@ -149,7 +163,7 @@ final class DrivingMonitor {
     private func persist() { defaults.set(try? JSONEncoder().encode(detector), forKey: "Whereabouts.drivingDetector") }
     private func stop() {
         generation += 1
-        querying = false
+        finishRefresh()
         buffered = []
         source.stop()
         timer?.invalidate()
