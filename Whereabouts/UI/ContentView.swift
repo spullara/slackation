@@ -48,7 +48,7 @@ struct HomeView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("CURRENT LOCATION").font(.caption).foregroundStyle(.secondary)
                         Text(current.locationName).font(.title2.bold()).accessibilityIdentifier("currentLocation")
-                        Text(current.text).foregroundStyle(.secondary)
+                        Text("\(current.displayEmoji)  \(current.text)").foregroundStyle(.secondary)
                     }
                 }.padding(.vertical, 8)
             }
@@ -73,7 +73,7 @@ struct HomeView: View {
                         Text(!runtime.destinations.enabledIDs.contains(destination.id) ? "Off" : configuredIDs.contains(destination.id) ? "Ready" : "Setup required")
                             .font(.caption).foregroundStyle(.secondary)
                         if let status = runtime.engine.lastSentStatuses[destination.id] {
-                            Text("\(status.emoji)  \(status.text)")
+                            Text("\(status.displayEmoji)  \(status.text)")
                             if let date = runtime.engine.lastSentDates[destination.id] {
                                 Text(date, format: .dateTime.month().day().hour().minute()).font(.caption).foregroundStyle(.secondary)
                             }
@@ -103,17 +103,19 @@ struct OtherStatusView: View {
     let runtime: LocationRuntime
     @Environment(\.dismiss) private var dismiss
     @State private var status = OtherStatus()
+    @State private var initialized = false
     @State private var error: String?
     var body: some View {
         Form {
             Section("Outside all geofences") {
                 TextField("Status text", text: $status.text)
-                TextField("Emoji, for example :globe_with_meridians:", text: $status.emoji)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                EmojiPickerButton(shortcode: $status.emoji, unicode: $status.emojiUnicode)
             }
             if let error { ErrorText(message: error) }
         }.navigationTitle("Other status")
-            .onAppear { status = runtime.store.otherStatus }
+            .onAppear {
+                if !initialized { status = runtime.store.otherStatus; initialized = true }
+            }
             .toolbar { Button("Save") {
                 do {
                     try runtime.store.save(geofences: runtime.store.geofences, otherStatus: status)

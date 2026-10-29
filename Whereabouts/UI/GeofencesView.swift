@@ -23,7 +23,7 @@ struct GeofencesView: View {
                             Image(systemName: "mappin.circle.fill").font(.title2)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(place.name).foregroundStyle(.primary).font(.headline)
-                                Text("\(place.statusEmoji)  \(place.statusText)").foregroundStyle(.secondary)
+                                Text("\(place.displayEmoji)  \(place.statusText)").foregroundStyle(.secondary)
                                 Text("\(Int(place.radius)) m radius").font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
@@ -138,9 +138,7 @@ struct GeofenceEditor: View {
             }
             Section("Status on arrival") {
                 TextField("Status text", text: $place.statusText).accessibilityIdentifier("statusText")
-                TextField("Emoji, for example :office:", text: $place.statusEmoji)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                Text("Use an emoji name between colons, for example :office:.").font(.caption).foregroundStyle(.secondary)
+                EmojiPickerButton(shortcode: $place.statusEmoji, unicode: $place.statusEmojiUnicode)
             }
         }.navigationTitle(runtime.store.geofences.contains(where: { $0.id == place.id }) ? "Edit geofence" : "New geofence")
             .navigationBarTitleDisplayMode(.inline)

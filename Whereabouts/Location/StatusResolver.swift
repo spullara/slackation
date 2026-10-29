@@ -7,6 +7,7 @@ enum StatusResolver {
             return $0.radius < $1.radius
         }
         return LocationStatus(locationName: selected?.name ?? "Other", text: selected?.statusText ?? other.text,
-                              emoji: selected?.statusEmoji ?? other.emoji, isOther: selected == nil)
+                              emoji: selected?.statusEmoji ?? other.emoji, isOther: selected == nil,
+                              emojiUnicode: selected == nil ? other.emojiUnicode : selected?.statusEmojiUnicode)
     }
 }

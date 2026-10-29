@@ -13,15 +13,15 @@ final class AppFlowTests: XCTestCase {
         app.buttons["Add geofence"].tap()
         XCTAssertTrue(app.textFields["placeName"].waitForExistence(timeout: 5))
         app.maps.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.6)).tap()
-        app.swipeUp()
         let status = app.textFields["statusText"]
+        scrollTo(status)
         status.tap()
-        status.typeText("At work")
+        status.typeText("At work\n")
         app.buttons["Save"].tap()
         XCTAssertTrue(app.alerts.staticTexts["Enter a name to save this geofence."].waitForExistence(timeout: 5))
         app.alerts.buttons["OK"].tap()
-        app.swipeDown()
         let name = app.textFields["placeName"]
+        scrollTo(name, down: true)
         name.tap()
         name.typeText("Save reproduction")
         XCTAssertTrue(app.buttons["Save"].isEnabled)
@@ -45,6 +45,58 @@ final class AppFlowTests: XCTestCase {
         edited.swipeLeft()
         app.buttons["Delete"].tap()
         XCTAssertFalse(edited.exists)
+    }
+
+    func testEmojiPickerAndCustomShortcode() {
+        app.tabBars.buttons["Geofences"].tap()
+        let oldRow = app.buttons.containing(.staticText, identifier: "Emoji test place").firstMatch
+        if oldRow.exists { oldRow.swipeLeft(); app.buttons["Delete"].tap() }
+        app.buttons["Add geofence"].tap()
+        let name = app.textFields["placeName"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        name.tap()
+        name.typeText("Emoji test place\n")
+        scrollTo(app.buttons["emojiPickerButton"])
+        app.buttons["emojiPickerButton"].tap()
+        let search = app.searchFields["Search emoji"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("coffee")
+        app.buttons[":coffee:"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["emojiPickerButton"].label.contains("☕"))
+        app.buttons["Save"].tap()
+        let row = app.buttons.containing(.staticText, identifier: "Emoji test place").firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        scrollTo(app.buttons["emojiPickerButton"])
+        app.buttons["emojiPickerButton"].tap()
+        XCTAssertTrue(app.staticTexts["Recent"].waitForExistence(timeout: 5))
+        capture("emoji-picker")
+        app.disclosureTriangles["Custom workspace emoji"].tap()
+        let custom = app.textFields["customEmoji"]
+        custom.tap()
+        custom.typeText(":my-team:")
+        app.buttons["Use custom emoji"].tap()
+        XCTAssertTrue(app.buttons["emojiPickerButton"].label.contains(":my-team:"))
+        app.buttons["Save"].tap()
+        app.terminate()
+        app.launch()
+        app.tabBars.buttons["Geofences"].tap()
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertTrue(row.label.contains(":my-team:"))
+        row.swipeLeft()
+        app.buttons["Delete"].tap()
+        app.tabBars.buttons["Home"].tap()
+        app.swipeUp()
+        app.buttons["Other status"].tap()
+        app.buttons["emojiPickerButton"].tap()
+        search.tap()
+        search.typeText("globe_with_meridians")
+        app.buttons[":globe_with_meridians:"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["emojiPickerButton"].label.contains("🌐"))
+        app.buttons["Save"].tap()
+        app.buttons["Other status"].tap()
+        XCTAssertTrue(app.buttons["emojiPickerButton"].label.contains("🌐"))
     }
 
     func testLocationDenied() throws {
@@ -72,6 +124,8 @@ final class AppFlowTests: XCTestCase {
         XCTAssertNotEqual(coordinates.label, expected)
         app.buttons["Use current location"].tap()
         expectation(for: NSPredicate(format: "label == %@", expected), evaluatedWith: coordinates)
+        waitForExpectations(timeout: 15)
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.staticTexts["Get current location"])
         waitForExpectations(timeout: 15)
         capture("editor-current-location")
         app.buttons["Cancel"].tap()
@@ -139,14 +193,22 @@ final class AppFlowTests: XCTestCase {
         capture("home-outside")
     }
 
+    private func scrollTo(_ element: XCUIElement, down: Bool = false) {
+        for _ in 0..<5 {
+            if element.exists && element.isHittable { return }
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: down ? 0.25 : 0.75))
+                .press(forDuration: 0.01, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: down ? 0.75 : 0.25)))
+        }
+    }
+
     private func addPlace(name: String, status: String) {
         if app.buttons.containing(.staticText, identifier: name).firstMatch.exists { return }
         app.buttons["Add geofence"].tap()
         let field = app.textFields["placeName"]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
-        field.tap(); field.typeText(name)
-        app.swipeUp()
+        field.tap(); field.typeText(name + "\n")
         let statusField = app.textFields["statusText"]
+        scrollTo(statusField)
         statusField.tap(); statusField.typeText(status)
         app.buttons["Save"].tap()
         XCTAssertTrue(app.navigationBars["Geofences"].waitForExistence(timeout: 5))

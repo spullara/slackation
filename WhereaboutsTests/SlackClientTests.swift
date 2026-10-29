@@ -29,6 +29,7 @@ final class SlackClientTests: XCTestCase {
         XCTAssertEqual(identity, SlackIdentity(user: "sam", team: "Workspace"))
     }
 
+    @MainActor
     func testSetStatusBodyAndHeaders() async throws {
         SlackMockProtocol.handler = { request in
             XCTAssertEqual(request.url?.path, "/api/users.profile.set")
@@ -54,7 +55,12 @@ final class SlackClientTests: XCTestCase {
             XCTAssertNil(body["token"])
             return (200, [:], #"{"ok":true}"#)
         }
-        try await client().setStatus(text: "At \"work\" 🏢", emoji: ":office:")
+        let suite = UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let destination = SlackDestination(defaults: defaults, session: session, tokenProvider: { "xoxp-test" })
+        let status = LocationStatus(locationName: "Office", text: "At \"work\" 🏢", emoji: ":office:", isOther: false, emojiUnicode: "🏢")
+        _ = try await destination.publish(status)
     }
 
     func testSlackErrors() async throws {
