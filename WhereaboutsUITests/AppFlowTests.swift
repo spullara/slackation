@@ -8,6 +8,45 @@ final class AppFlowTests: XCTestCase {
         app.launch()
     }
 
+    func testSaveValidationAndPersistence() {
+        app.tabBars.buttons["Geofences"].tap()
+        app.buttons["Add geofence"].tap()
+        XCTAssertTrue(app.textFields["placeName"].waitForExistence(timeout: 5))
+        app.maps.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.6)).tap()
+        app.swipeUp()
+        let status = app.textFields["statusText"]
+        status.tap()
+        status.typeText("At work")
+        app.buttons["Save"].tap()
+        XCTAssertTrue(app.alerts.staticTexts["Enter a name to save this geofence."].waitForExistence(timeout: 5))
+        app.alerts.buttons["OK"].tap()
+        app.swipeDown()
+        let name = app.textFields["placeName"]
+        name.tap()
+        name.typeText("Save reproduction")
+        XCTAssertTrue(app.buttons["Save"].isEnabled)
+        app.buttons["Save"].tap()
+        let row = app.buttons.containing(.staticText, identifier: "Save reproduction").firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        app.terminate()
+        app.launch()
+        app.tabBars.buttons["Geofences"].tap()
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        let editName = app.textFields["placeName"]
+        editName.tap()
+        editName.typeText(" edited")
+        app.buttons["Save"].tap()
+        app.terminate()
+        app.launch()
+        app.tabBars.buttons["Geofences"].tap()
+        let edited = app.buttons.containing(.staticText, identifier: "Save reproduction edited").firstMatch
+        XCTAssertTrue(edited.waitForExistence(timeout: 5))
+        edited.swipeLeft()
+        app.buttons["Delete"].tap()
+        XCTAssertFalse(edited.exists)
+    }
+
     func testScreensAndPlaceEditing() {
         app.tabBars.buttons["Destinations"].tap()
         XCTAssertTrue(app.switches["Send status"].exists)

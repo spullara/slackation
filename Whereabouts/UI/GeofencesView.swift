@@ -72,6 +72,10 @@ struct GeofenceEditor: View {
         Form {
             Section("Place") {
                 TextField("Name", text: $place.name).accessibilityIdentifier("placeName")
+                if place.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("Enter a name to save this geofence.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 HStack {
                     TextField("Search for an address", text: $query).submitLabel(.search)
                         .onSubmit { Task { await search() } }
@@ -117,14 +121,16 @@ struct GeofenceEditor: View {
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                 Text("Use an emoji name between colons, for example :office:.").font(.caption).foregroundStyle(.secondary)
             }
-            if let error { Section { ErrorText(message: error) } }
         }.navigationTitle(runtime.store.geofences.contains(where: { $0.id == place.id }) ? "Edit geofence" : "New geofence")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear { frameCenter() }
+            .alert("Geofence", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
+                Button("OK", role: .cancel) { error = nil }
+            } message: { Text(error ?? "") }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save", action: save).disabled(place.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button("Save", action: save)
                 }
             }
     }
@@ -149,6 +155,10 @@ struct GeofenceEditor: View {
     }
     private func save() {
         place.name = place.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !place.name.isEmpty else {
+            error = "Enter a name to save this geofence."
+            return
+        }
         var places = runtime.store.geofences
         if let index = places.firstIndex(where: { $0.id == place.id }) { places[index] = place }
         else { places.append(place) }
