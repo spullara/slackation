@@ -6,17 +6,18 @@ final class DrivingTests: XCTestCase {
     private func sample(_ seconds: Double, _ activity: MotionSample.Activity, _ confidence: MotionSample.Confidence = .high) -> MotionSample {
         MotionSample(date: start.addingTimeInterval(seconds), activity: activity, confidence: confidence)
     }
-    func testHighStartsImmediatelyAndStopNeedsFiveMinutes() {
+    func testHighStartsImmediatelyAndStopNeedsTwoMinutes() {
         var detector = DrivingDetector()
         XCTAssertTrue(detector.update(samples: [sample(0, .automotive)], now: start))
-        XCTAssertTrue(detector.update(samples: [sample(10, .stopped)], now: start.addingTimeInterval(309)))
-        XCTAssertFalse(detector.update(samples: [], now: start.addingTimeInterval(310)))
+        XCTAssertTrue(detector.update(samples: [sample(10, .stopped)], now: start.addingTimeInterval(129)))
+        XCTAssertFalse(detector.update(samples: [], now: start.addingTimeInterval(130)))
     }
     func testMediumNeedsTwoMinutesAndAutomotiveCancelsStop() {
         var detector = DrivingDetector()
         XCTAssertFalse(detector.update(samples: [sample(0, .automotive, .medium)], now: start.addingTimeInterval(119)))
         XCTAssertTrue(detector.update(samples: [], now: start.addingTimeInterval(120)))
-        XCTAssertTrue(detector.update(samples: [sample(130, .stopped), sample(400, .automotive, .medium)], now: start.addingTimeInterval(500)))
+        XCTAssertTrue(detector.update(samples: [sample(130, .stopped), sample(249, .automotive, .medium)], now: start.addingTimeInterval(250)))
+        XCTAssertTrue(detector.update(samples: [], now: start.addingTimeInterval(500)))
     }
     func testUnknownAndLowCannotStartOrStop() {
         var detector = DrivingDetector()
@@ -26,8 +27,8 @@ final class DrivingTests: XCTestCase {
     func testUnknownBreaksMediumEvidenceAndHistoryIsOrdered() {
         var detector = DrivingDetector()
         XCTAssertFalse(detector.update(samples: [sample(90, .unknown), sample(0, .automotive, .medium)], now: start.addingTimeInterval(300)))
-        XCTAssertTrue(detector.update(samples: [sample(400, .automotive), sample(410, .stopped)], now: start.addingTimeInterval(709)))
-        XCTAssertFalse(detector.update(samples: [sample(400, .automotive)], now: start.addingTimeInterval(710)))
+        XCTAssertTrue(detector.update(samples: [sample(400, .automotive), sample(410, .stopped)], now: start.addingTimeInterval(529)))
+        XCTAssertFalse(detector.update(samples: [sample(400, .automotive)], now: start.addingTimeInterval(530)))
     }
     func testResolverPriorityAndReturnToPlace() {
         let place = Geofence(name: "Office", latitude: 0, longitude: 0, radius: 100, statusText: "At work", statusEmoji: ":office:")
@@ -102,7 +103,7 @@ final class DrivingTests: XCTestCase {
         source.receive?([MotionSample(date: now, activity: .stopped, confidence: .high)])
         source.resume?.resume(returning: [MotionSample(date: now.addingTimeInterval(-60), activity: .automotive, confidence: .high)])
         await refresh.value
-        XCTAssertTrue(monitor.isDriving, "A fresh stop must retain Driving for five minutes.")
+        XCTAssertTrue(monitor.isDriving, "A fresh stop must retain Driving for two minutes.")
         monitor.setEnabled(false)
     }
 

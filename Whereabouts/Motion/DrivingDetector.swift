@@ -11,7 +11,7 @@ struct MotionSample: Sendable {
 /// Activity samples describe transitions, not periodic measurements.
 struct DrivingDetector: Codable {
     static let startDelay: TimeInterval = 120
-    static let stopDelay: TimeInterval = 300
+    static let stopDelay: TimeInterval = 120
     private(set) var isDriving = false
     private(set) var lastSampleDate: Date?
     private var automotiveSince: Date?

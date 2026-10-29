@@ -28,3 +28,11 @@ The store uses `Application Support/Whereabouts/geofences.json` inside the app c
 Call `load()` at startup. Call `save(geofences:otherStatus:)` to save changes.
 Both methods throw errors for the caller to show. The store accepts at most 20 geofences with unique IDs.
 A failed save preserves the previous state. Tests use temporary files outside the app data path.
+
+## Driving detection
+
+Driving ends after two minutes of stationary or walking activity. Unknown or low-confidence activity does not end Driving.
+
+## License
+
+This project uses the [MIT License](LICENSE). The bundled emoji data retains its [separate license](Whereabouts/Emoji/Emoji-LICENSE.txt).

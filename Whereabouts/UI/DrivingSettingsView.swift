@@ -18,7 +18,7 @@ struct DrivingSettingsView: View {
                 EmojiPickerButton(shortcode: $status.emoji, unicode: $status.emojiUnicode)
             }
             Section {
-                Text("Driving ends after five minutes of stationary or walking activity. Background updates need Always location access.")
+                Text("Driving ends after two minutes of stationary or walking activity. Background updates need Always location access.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
         }
