@@ -13,6 +13,7 @@ protocol MotionActivitySource: AnyObject {
 @MainActor
 final class CoreMotionSource: MotionActivitySource {
     private let manager = CMMotionActivityManager()
+    private var historyContinuations: [UUID: CheckedContinuation<[MotionSample], Error>] = [:]
     var available: Bool { CMMotionActivityManager.isActivityAvailable() }
     var denied: Bool { [.denied, .restricted].contains(CMMotionActivityManager.authorizationStatus()) }
     func start(_ receive: @escaping ([MotionSample]) -> Void) {
@@ -23,10 +24,22 @@ final class CoreMotionSource: MotionActivitySource {
     }
     func stop() { manager.stopActivityUpdates() }
     func history(from: Date, to: Date) async throws -> [MotionSample] {
-        try await withCheckedThrowingContinuation { continuation in
-            manager.queryActivityStarting(from: from, to: to, to: .main) { activities, error in
-                if let error { continuation.resume(throwing: error) }
-                else { continuation.resume(returning: (activities ?? []).map(Self.sample)) }
+        let id = UUID()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                guard !Task.isCancelled else { continuation.resume(throwing: CancellationError()); return }
+                historyContinuations[id] = continuation
+                manager.queryActivityStarting(from: from, to: to, to: .main) { [weak self] activities, error in
+                    let result: Result<[MotionSample], Error> = error.map { .failure($0) }
+                        ?? .success((activities ?? []).map(Self.sample))
+                    Task { @MainActor in
+                        self?.historyContinuations.removeValue(forKey: id)?.resume(with: result)
+                    }
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.historyContinuations.removeValue(forKey: id)?.resume(throwing: CancellationError())
             }
         }
     }
@@ -52,12 +65,19 @@ final class DrivingMonitor {
     private var detector: DrivingDetector
     private var timer: Timer?
     private var generation = 0
-    private var querying = false
+    private var queryID: UUID?
+    private var querying: Bool { queryID != nil }
+    private var queryTask: Task<Void, Never>?
+    private var timeoutTask: Task<Void, Never>?
+    private var queryLease: BackgroundLease?
+    private let historyTimeout: TimeInterval
     private var refreshWaiters: [CheckedContinuation<Void, Never>] = []
     private var buffered: [MotionSample] = []
     private let preview: Bool
 
-    init(source: MotionActivitySource? = nil, defaults: UserDefaults = .standard, preview: Bool = false) {
+    init(source: MotionActivitySource? = nil, defaults: UserDefaults = .standard, preview: Bool = false,
+         historyTimeout: TimeInterval = DrivingDetector.historyTimeout) {
+        self.historyTimeout = historyTimeout
         self.source = source ?? CoreMotionSource()
         self.defaults = defaults
         self.preview = preview
@@ -115,39 +135,76 @@ final class DrivingMonitor {
 
     func refresh() async {
         start()
-        guard isMonitoring else { return }
-        if querying {
-            // Region exits must resolve only after the active history query finishes.
-            await withCheckedContinuation { refreshWaiters.append($0) }
-            return
+        guard isMonitoring, !Task.isCancelled else { return }
+        let token = queryID ?? UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard !Task.isCancelled else { continuation.resume(); return }
+                refreshWaiters.append(continuation)
+                if queryID == nil { beginRefresh(token) }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.cancelRefresh(token, timedOut: false) }
         }
-        let lease = BackgroundLease()
-        defer { lease.end() }
-        querying = true
-        let token = generation
-        defer {
-            if generation == token { finishRefresh() }
-        }
+    }
+
+    private func beginRefresh(_ token: UUID) {
+        queryID = token
+        queryLease = BackgroundLease()
         let now = Date()
         let from = max(detector.lastSampleDate ?? now.addingTimeInterval(-86400), now.addingTimeInterval(-86400))
-        do {
-            let samples = try await source.history(from: from, to: now)
-            guard generation == token, isMonitoring else { return }
+        let source = source
+        // The source may ignore cancellation. It must not retain the monitor or its callers.
+        queryTask = Task { [weak self] in
+            do {
+                let samples = try await source.history(from: from, to: now)
+                self?.completeRefresh(token, result: .success(samples))
+            } catch {
+                self?.completeRefresh(token, result: .failure(error))
+            }
+        }
+        let timeout = historyTimeout
+        timeoutTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(timeout)) }
+            catch { return }
+            self?.cancelRefresh(token, timedOut: true)
+        }
+    }
+
+    private func completeRefresh(_ token: UUID, result: Result<[MotionSample], Error>) {
+        guard queryID == token, isMonitoring else { return }
+        switch result {
+        case .success(let samples):
             let all = samples + buffered
             buffered = []
             consume(all)
-        } catch {
-            guard generation == token, isMonitoring else { return }
+        case .failure:
             if source.denied { start() }
             else { issue = "Could not read motion activity. The app will try again." }
             let samples = buffered
             buffered = []
             if isMonitoring { consume(samples) }
         }
+        // Permission handling or an onChange callback can stop this query.
+        if queryID == token { finishRefresh() }
+    }
+
+    private func cancelRefresh(_ token: UUID, timedOut: Bool) {
+        guard queryID == token else { return }
+        if timedOut { issue = "Motion activity timed out. The app will try again." }
+        // Preserve the last known state when no history result is available.
+        buffered = []
+        finishRefresh()
     }
 
     private func finishRefresh() {
-        querying = false
+        queryID = nil
+        queryTask?.cancel()
+        queryTask = nil
+        timeoutTask?.cancel()
+        timeoutTask = nil
+        queryLease?.end()
+        queryLease = nil
         let waiters = refreshWaiters
         refreshWaiters = []
         for waiter in waiters { waiter.resume() }

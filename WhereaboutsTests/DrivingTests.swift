@@ -266,6 +266,128 @@ final class DrivingTests: XCTestCase {
     }
 
     @MainActor
+    func testTimeoutReleasesOwnerAndWaitersAndRejectsLateResultDuringNewQuery() async {
+        let source = FakeMotionSource()
+        source.pauseHistory = true
+        let motion = DrivingMonitor(source: source, defaults: defaults(), historyTimeout: 0.05)
+        var ownerFinished = false
+        var waiterFinished = false
+        let owner = Task { await motion.refresh(); ownerFinished = true }
+        await waitUntil { source.resume != nil }
+        let oldResult = source.resume
+        let waiter = Task { await motion.refresh(); waiterFinished = true }
+        await waitUntil { ownerFinished && waiterFinished }
+        await owner.value
+        await waiter.value
+        XCTAssertFalse(motion.isDriving)
+        XCTAssertNotNil(motion.issue)
+        XCTAssertEqual(source.queries, 1)
+
+        source.resume = nil
+        var nextFinished = false
+        let next = Task { await motion.refresh(); nextFinished = true }
+        await waitUntil { source.resume != nil }
+        oldResult?.resume(returning: [MotionSample(date: Date(), activity: .automotive, confidence: .high)])
+        try? await Task.sleep(for: .milliseconds(5))
+        XCTAssertFalse(motion.isDriving)
+        XCTAssertFalse(nextFinished, "An old result must not release the new query.")
+        source.resume?.resume(returning: [MotionSample(date: Date(), activity: .automotive, confidence: .high)])
+        await next.value
+        XCTAssertTrue(motion.isDriving)
+        XCTAssertEqual(source.queries, 2)
+        motion.setEnabled(false)
+    }
+
+    @MainActor
+    func testCancellingOwnerOrWaiterReleasesEveryCaller() async {
+        for cancelOwner in [true, false] {
+            let source = FakeMotionSource()
+            source.pauseHistory = true
+            let motion = DrivingMonitor(source: source, defaults: defaults(), historyTimeout: 60)
+            var ownerFinished = false
+            var waiterFinished = false
+            let owner = Task { await motion.refresh(); ownerFinished = true }
+            await waitUntil { source.resume != nil }
+            let waiter = Task { await motion.refresh(); waiterFinished = true }
+            try? await Task.sleep(for: .milliseconds(5))
+            if cancelOwner { owner.cancel() } else { waiter.cancel() }
+            await waitUntil { ownerFinished && waiterFinished }
+            XCTAssertFalse(motion.isDriving)
+            // Release the fake source only after proving callers did not need its callback.
+            source.resume?.resume(returning: [
+                MotionSample(date: Date(), activity: .automotive, confidence: .high)
+            ])
+            await owner.value
+            await waiter.value
+            try? await Task.sleep(for: .milliseconds(5))
+            XCTAssertFalse(motion.isDriving)
+            source.pauseHistory = false
+            await motion.refresh()
+            XCTAssertEqual(source.queries, 2)
+            motion.setEnabled(false)
+        }
+    }
+
+    @MainActor
+    func testRegionExitTimeoutPublishesLastKnownDrivingOrOther() async throws {
+        for wasDriving in [true, false] {
+            let source = FakeMotionSource()
+            let motion = DrivingMonitor(source: source, defaults: defaults(), historyTimeout: 0.05)
+            await motion.refresh()
+            if wasDriving {
+                source.receive?([MotionSample(date: Date(), activity: .automotive, confidence: .high)])
+            }
+            let (runtime, destination, region) = try runtime(motion: motion)
+            // Allow initial authorization callbacks before simulating region state.
+            try? await Task.sleep(for: .milliseconds(10))
+            runtime.monitor.locationManager(CLLocationManager(), didEnterRegion: region)
+            await waitUntil { runtime.engine.lastSentStatuses[destination.id]?.locationName == "Office" }
+            try? await Task.sleep(for: .milliseconds(5))
+            let beforeExit = destination.calls.map(\.locationName)
+            XCTAssertEqual(beforeExit.last, "Office")
+            source.pauseHistory = true
+            source.resume = nil
+            runtime.monitor.locationManager(CLLocationManager(), didExitRegion: region)
+            await waitUntil { source.resume != nil }
+            var waiterFinished = false
+            let waiter = Task { await motion.refresh(); waiterFinished = true }
+            let expected = wasDriving ? "Driving" : "Other"
+            await waitUntil { waiterFinished && runtime.engine.lastSentStatuses[destination.id]?.locationName == expected }
+            XCTAssertEqual(destination.calls.map(\.locationName), beforeExit + [expected])
+            XCTAssertEqual(motion.isDriving, wasDriving)
+            source.pauseHistory = false
+            source.resume?.resume(returning: [])
+            await waiter.value
+            motion.setEnabled(false)
+        }
+    }
+
+    @MainActor
+    func testDisableReleasesRuntimeOwnedQueryWithoutSourceCallback() async throws {
+        let source = FakeMotionSource()
+        let motion = DrivingMonitor(source: source, defaults: defaults(), historyTimeout: 60)
+        await motion.refresh()
+        source.receive?([MotionSample(date: Date(), activity: .automotive, confidence: .high)])
+        let (runtime, destination, _) = try runtime(motion: motion)
+        runtime.monitor.configure(geofences: [], other: OtherStatus())
+        runtime.monitor.onMotionWake?()
+        await waitUntil { runtime.engine.lastSentStatuses[destination.id]?.locationName == "Driving" }
+        try? await Task.sleep(for: .milliseconds(5))
+        source.pauseHistory = true
+        runtime.monitor.onMotionWake?()
+        await waitUntil { source.resume != nil }
+        motion.setEnabled(false)
+        await waitUntil { runtime.engine.lastSentStatuses[destination.id]?.locationName == "Other" }
+        XCTAssertEqual(destination.calls.map(\.locationName), ["Driving", "Other"])
+        source.resume?.resume(returning: [
+            MotionSample(date: Date(), activity: .automotive, confidence: .high)
+        ])
+        try? await Task.sleep(for: .milliseconds(5))
+        XCTAssertFalse(motion.isDriving)
+        XCTAssertEqual(runtime.currentStatus.locationName, "Other")
+    }
+
+    @MainActor
     private func runtime(motion: DrivingMonitor) throws -> (LocationRuntime, RecordingDestination, CLCircularRegion) {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }

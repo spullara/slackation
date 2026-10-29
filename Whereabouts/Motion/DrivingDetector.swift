@@ -12,6 +12,7 @@ struct MotionSample: Sendable {
 struct DrivingDetector: Codable {
     static let startDelay: TimeInterval = 120
     static let stopDelay: TimeInterval = 120
+    static let historyTimeout: TimeInterval = 10
     private(set) var isDriving = false
     private(set) var lastSampleDate: Date?
     private var automotiveSince: Date?
