@@ -60,7 +60,7 @@ final class StatusEngine {
 }
 
 @MainActor
-private final class BackgroundLease {
+final class BackgroundLease {
     private var identifier: UIBackgroundTaskIdentifier = .invalid
 
     init() {

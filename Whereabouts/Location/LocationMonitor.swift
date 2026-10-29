@@ -12,6 +12,9 @@ final class LocationMonitor: NSObject, @preconcurrency CLLocationManagerDelegate
     private var locationRequested = false
     private let locationKey = "Whereabouts.lastLocation"
     private(set) var insideIDs: Set<UUID> = []
+    var onMotionWake: (() -> Void)?
+    private var significantChangesEnabled = false
+    var isReady: Bool { pendingIDs.isEmpty }
     var onStatusChange: ((LocationStatus) -> Void)?
     private let manager: CLLocationManager
     private var geofences: [Geofence] = []
@@ -51,6 +54,13 @@ final class LocationMonitor: NSObject, @preconcurrency CLLocationManagerDelegate
             locationRequested = false
             locationError = "Location access is disabled. Open Settings to allow access."
         }
+    }
+
+    func setSignificantChangesEnabled(_ enabled: Bool) {
+        significantChangesEnabled = enabled
+        if enabled && (authorizationStatus == .authorizedAlways || authorizationStatus == .authorizedWhenInUse) {
+            manager.startMonitoringSignificantLocationChanges()
+        } else { manager.stopMonitoringSignificantLocationChanges() }
     }
 
     func requestAlwaysAuthorization() {
@@ -106,6 +116,7 @@ final class LocationMonitor: NSObject, @preconcurrency CLLocationManagerDelegate
               geofences.contains(where: { $0.id == id }) else { return }
         if inside { insideIDs.insert(id) } else { insideIDs.remove(id) }
         pendingIDs.remove(id)
+        onMotionWake?()
         publishIfReady()
     }
 
@@ -121,11 +132,13 @@ final class LocationMonitor: NSObject, @preconcurrency CLLocationManagerDelegate
             lastError = "Location access is disabled. Enable Always access in Settings for background updates."
         }
         registerRegions()
+        setSignificantChangesEnabled(significantChangesEnabled)
         if locationRequested { requestCurrentLocation() }
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last(where: { $0.horizontalAccuracy >= 0 && CLLocationCoordinate2DIsValid($0.coordinate) }) else { return }
+        onMotionWake?()
         currentLocation = location
         UserDefaults.standard.set([location.coordinate.latitude, location.coordinate.longitude], forKey: locationKey)
         isLocating = false

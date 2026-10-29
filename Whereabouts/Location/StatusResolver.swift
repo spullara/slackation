@@ -1,7 +1,12 @@
 import Foundation
 
 enum StatusResolver {
-    static func resolve(geofences: [Geofence], insideIDs: Set<UUID>, other: OtherStatus) -> LocationStatus {
+    static func resolve(geofences: [Geofence], insideIDs: Set<UUID>, other: OtherStatus, isDriving: Bool = false,
+                        drivingStatus: OtherStatus = OtherStatus(text: "Driving", emoji: ":car:")) -> LocationStatus {
+        if isDriving {
+            return LocationStatus(locationName: "Driving", text: drivingStatus.text, emoji: drivingStatus.emoji,
+                                  isOther: false, emojiUnicode: drivingStatus.emojiUnicode)
+        }
         let selected = geofences.filter { insideIDs.contains($0.id) }.min {
             if $0.radius == $1.radius { return $0.id.uuidString < $1.id.uuidString }
             return $0.radius < $1.radius

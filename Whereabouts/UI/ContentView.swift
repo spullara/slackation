@@ -26,8 +26,7 @@ struct HomeView: View {
     @State private var configuredIDs: Set<String> = []
     @Environment(\.openURL) private var openURL
     private var current: LocationStatus {
-        StatusResolver.resolve(geofences: runtime.store.geofences,
-                               insideIDs: runtime.monitor.insideIDs, other: runtime.store.otherStatus)
+        runtime.currentStatus
     }
     private var permission: String {
         switch runtime.monitor.authorizationStatus {
@@ -51,6 +50,13 @@ struct HomeView: View {
                         Text("\(current.displayEmoji)  \(current.text)").foregroundStyle(.secondary)
                     }
                 }.padding(.vertical, 8)
+            }
+            Section {
+                NavigationLink("Driving") { DrivingSettingsView(runtime: runtime) }
+                if let issue = runtime.driving.issue, runtime.driving.enabled {
+                    ErrorText(message: issue)
+                    Button("Open motion settings") { openURL(URL(string: UIApplication.openSettingsURLString)!) }
+                }
             }
             Section("Location access") {
                 Label(permission, systemImage: "location")

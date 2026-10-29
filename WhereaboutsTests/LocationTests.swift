@@ -36,6 +36,16 @@ final class LocationTests: XCTestCase {
     }
 
     @MainActor
+    func testDrivingReturnsToSameGeofenceWithoutDuplicateSends() async {
+        let client = FakeDestination()
+        let engine = StatusEngine(registry: DestinationRegistry(destinations: [client], defaults: isolatedDefaults()), defaults: isolatedDefaults())
+        let office = LocationStatus(locationName: "Office", text: "At work", emoji: ":office:", isOther: false)
+        let driving = StatusResolver.resolve(geofences: [], insideIDs: [], other: OtherStatus(), isDriving: true)
+        for status in [office, office, driving, driving, office, office] { await engine.update(status) }
+        XCTAssertEqual(client.calls, [office, driving, office])
+    }
+
+    @MainActor
     func testFailureIsKeptAndCanRetry() async {
         let client = FakeDestination()
         let engine = StatusEngine(registry: DestinationRegistry(destinations: [client], defaults: isolatedDefaults()), defaults: isolatedDefaults())

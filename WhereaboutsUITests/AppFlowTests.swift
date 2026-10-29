@@ -8,6 +8,28 @@ final class AppFlowTests: XCTestCase {
         app.launch()
     }
 
+    func testDrivingSettingsAndHome() {
+        app.terminate()
+        app.launchArguments = ["--preview-driving"]
+        app.launch()
+        XCTAssertEqual(app.staticTexts["currentLocation"].label, "Driving")
+        capture("home-driving")
+        app.buttons["Driving"].tap()
+        XCTAssertTrue(app.switches["Detect driving"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["emojiPickerButton"].label.contains("🚗"))
+        capture("driving-settings")
+        let toggle = app.switches["Detect driving"]
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        XCTAssertEqual(toggle.value as? String, "0")
+        app.buttons["Save"].tap()
+        XCTAssertNotEqual(app.staticTexts["currentLocation"].label, "Driving")
+        app.buttons["Driving"].tap()
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        app.buttons["Save"].tap()
+        app.terminate()
+        app.launchArguments = []
+    }
+
     func testSaveValidationAndPersistence() {
         app.tabBars.buttons["Geofences"].tap()
         app.buttons["Add geofence"].tap()
