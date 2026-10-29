@@ -1,4 +1,5 @@
 import XCTest
+import CoreLocation
 @testable import Whereabouts
 
 final class DrivingTests: XCTestCase {
@@ -32,7 +33,10 @@ final class DrivingTests: XCTestCase {
     }
     func testResolverPriorityAndReturnToPlace() {
         let place = Geofence(name: "Office", latitude: 0, longitude: 0, radius: 100, statusText: "At work", statusEmoji: ":office:")
-        let driving = StatusResolver.resolve(geofences: [place], insideIDs: [place.id], other: OtherStatus(), isDriving: true)
+        let inside = StatusResolver.resolve(geofences: [place], insideIDs: [place.id], other: OtherStatus(), isDriving: true)
+        XCTAssertEqual(inside.locationName, "Office")
+        XCTAssertEqual(inside.geofenceID, place.id)
+        let driving = StatusResolver.resolve(geofences: [place], insideIDs: [], other: OtherStatus(), isDriving: true)
         XCTAssertEqual(driving.locationName, "Driving")
         XCTAssertEqual(driving.emoji, ":car:")
         XCTAssertFalse(driving.isOther)
@@ -107,6 +111,77 @@ final class DrivingTests: XCTestCase {
         monitor.setEnabled(false)
     }
 
+    @MainActor
+    func testRegionEntryPublishesBeforeHistoryAndDrivingEndIsDeduplicated() async throws {
+        let source = FakeMotionSource()
+        let motion = DrivingMonitor(source: source, defaults: defaults())
+        await motion.refresh()
+        source.receive?([MotionSample(date: Date().addingTimeInterval(-180), activity: .automotive, confidence: .high)])
+        XCTAssertTrue(motion.isDriving)
+        let (runtime, destination, region) = try runtime(motion: motion)
+        await runtime.engine.update(runtime.currentStatus)
+        source.pauseHistory = true
+        runtime.monitor.locationManager(CLLocationManager(), didEnterRegion: region)
+        await waitUntil { source.resume != nil && destination.calls.count == 2 }
+        XCTAssertEqual(destination.calls.map(\.locationName), ["Driving", "Office"])
+        source.resume?.resume(returning: [
+            MotionSample(date: Date().addingTimeInterval(-121), activity: .stopped, confidence: .high)
+        ])
+        source.pauseHistory = false
+        await waitUntil { !motion.isDriving }
+        // Let the queued region evaluation and destination updates finish.
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertEqual(destination.calls.map(\.locationName), ["Driving", "Office"])
+        motion.setEnabled(false)
+    }
+
+    @MainActor
+    func testRegionExitRefreshesHistoryBeforePublishingDriving() async throws {
+        let source = FakeMotionSource()
+        let motion = DrivingMonitor(source: source, defaults: defaults())
+        let (runtime, destination, region) = try runtime(motion: motion)
+        runtime.monitor.locationManager(CLLocationManager(), didEnterRegion: region)
+        await waitUntil { destination.calls.count == 1 && source.queries > 0 }
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertFalse(motion.isDriving)
+        source.pauseHistory = true
+        runtime.monitor.locationManager(CLLocationManager(), didExitRegion: region)
+        await waitUntil { source.resume != nil }
+        XCTAssertEqual(destination.calls.map(\.locationName), ["Office"])
+        source.resume?.resume(returning: [
+            MotionSample(date: Date(), activity: .automotive, confidence: .high)
+        ])
+        source.pauseHistory = false
+        await waitUntil { destination.calls.count == 2 }
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertEqual(destination.calls.map(\.locationName), ["Office", "Driving"])
+        motion.setEnabled(false)
+    }
+
+    @MainActor
+    private func runtime(motion: DrivingMonitor) throws -> (LocationRuntime, RecordingDestination, CLCircularRegion) {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let store = GeofenceStore(fileURL: directory.appendingPathComponent("places.json"))
+        let place = Geofence(name: "Office", latitude: 0, longitude: 0, radius: 100,
+                             statusText: "At work", statusEmoji: ":office:")
+        try store.save(geofences: [place], otherStatus: OtherStatus())
+        let destination = RecordingDestination()
+        let registry = DestinationRegistry(destinations: [destination], defaults: defaults())
+        let runtime = LocationRuntime(store: store, driving: motion, destinations: registry, defaults: defaults())
+        runtime.monitor.configure(geofences: [place], other: OtherStatus())
+        let region = CLCircularRegion(center: CLLocationCoordinate2D(latitude: 0, longitude: 0),
+                                      radius: 100, identifier: "whereabouts." + place.id.uuidString)
+        return (runtime, destination, region)
+    }
+
+    @MainActor
+    private func waitUntil(_ condition: () -> Bool) async {
+        let deadline = Date().addingTimeInterval(3)
+        while !condition() && Date() < deadline { await Task.yield() }
+        XCTAssertTrue(condition(), "Expected asynchronous status update.")
+    }
+
     private func defaults() -> UserDefaults {
         let name = "DrivingTests." + UUID().uuidString
         let result = UserDefaults(suiteName: name)!
@@ -130,5 +205,18 @@ private final class FakeMotionSource: MotionActivitySource {
         queries += 1
         if pauseHistory { return await withCheckedContinuation { resume = $0 } }
         return []
+    }
+}
+
+
+@MainActor
+private final class RecordingDestination: StatusDestination {
+    let id = "region-test"
+    let displayName = "Test"
+    var isConfigured = true
+    var calls: [LocationStatus] = []
+    func publish(_ status: LocationStatus) async throws -> PublishOutcome {
+        calls.append(status)
+        return .sent
     }
 }

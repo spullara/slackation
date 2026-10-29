@@ -31,6 +31,9 @@ A failed save preserves the previous state. Tests use temporary files outside th
 
 ## Driving detection
 
+Status priority is geofence > Driving > Other. A geofence entry sends the place status immediately, even when motion still reports driving.
+On exit, the app reads motion history before it selects Driving or Other.
+
 Driving ends after two minutes of stationary or walking activity. Unknown or low-confidence activity does not end Driving.
 
 ## License

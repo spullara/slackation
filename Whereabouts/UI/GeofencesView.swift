@@ -31,7 +31,7 @@ struct GeofencesView: View {
                         }.padding(.vertical, 4)
                     }
                 }.onDelete(perform: delete)
-            } footer: { Text("\(runtime.store.geofences.count) of 20 geofences. If places overlap, the smallest radius wins.") }
+            } footer: { Text("\(runtime.store.geofences.count) of 20 geofences. Saved places take priority over Driving. If places overlap, the smallest radius wins.") }
             if let error { ErrorText(message: error) }
         }.navigationTitle("Geofences")
             .toolbar {

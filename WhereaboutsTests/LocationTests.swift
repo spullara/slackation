@@ -9,7 +9,7 @@ final class LocationTests: XCTestCase {
         XCTAssertEqual(StatusResolver.resolve(geofences: [large, small], insideIDs: [], other: other),
                        LocationStatus(locationName: "Other", text: other.text, emoji: other.emoji, isOther: true))
         XCTAssertEqual(StatusResolver.resolve(geofences: [large, small], insideIDs: [large.id], other: other).text, "Office")
-        XCTAssertEqual(StatusResolver.resolve(geofences: [large, small], insideIDs: [large.id, small.id], other: other).text, "Desk")
+        XCTAssertEqual(StatusResolver.resolve(geofences: [large, small], insideIDs: [large.id, small.id], other: other, isDriving: true).text, "Desk")
     }
 
     func testEqualRadiusHasStableTieBreak() {

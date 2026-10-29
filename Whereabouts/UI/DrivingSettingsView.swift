@@ -11,7 +11,7 @@ struct DrivingSettingsView: View {
             Section {
                 Toggle("Detect driving", isOn: Binding(get: { runtime.driving.enabled }, set: { runtime.driving.setEnabled($0) }))
             } footer: {
-                Text("Use motion activity to detect driving. Driving takes priority over saved places.")
+                Text("Use motion activity to detect driving. Saved places take priority over Driving.")
             }
             Section("Driving status") {
                 TextField("Status text", text: $status.text)

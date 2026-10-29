@@ -6,7 +6,7 @@ import UIKit
 @Observable
 final class LocationRuntime {
     static let shared = LocationRuntime()
-    let store = GeofenceStore()
+    let store: GeofenceStore
     let webhooks = WebhookStore()
     let monitor = LocationMonitor()
     let driving: DrivingMonitor
@@ -17,20 +17,26 @@ final class LocationRuntime {
     private var evaluateAgain = false
     private(set) var storageError: String?
 
-    private init() {
+    init(store: GeofenceStore? = nil, driving: DrivingMonitor? = nil,
+         destinations: DestinationRegistry? = nil, defaults: UserDefaults = .standard) {
+        self.store = store ?? GeofenceStore()
         #if DEBUG
         isPreview = ProcessInfo.processInfo.arguments.contains("--preview-driving")
-        driving = DrivingMonitor(preview: isPreview)
+        self.driving = driving ?? DrivingMonitor(preview: isPreview)
         #else
         isPreview = false
-        driving = DrivingMonitor()
+        self.driving = driving ?? DrivingMonitor()
         #endif
-        destinations = DestinationRegistry(destinations: [SlackDestination()])
-        engine = StatusEngine(registry: destinations)
+        self.destinations = destinations ?? DestinationRegistry(destinations: [SlackDestination()])
+        engine = StatusEngine(registry: self.destinations, defaults: defaults)
         monitor.onStatusChange = { [weak self] _ in self?.evaluateStatus() }
         monitor.onMotionWake = { [weak self] in self?.evaluateStatus() }
-        driving.onChange = { [weak self] in self?.publishStatus() }
-        driving.onMonitoringChange = { [weak self] enabled in self?.monitor.setSignificantChangesEnabled(enabled) }
+        self.driving.onChange = { [weak self] in
+            guard let self else { return }
+            if self.evaluating { self.evaluateAgain = true; return }
+            self.publishStatus()
+        }
+        self.driving.onMonitoringChange = { [weak self] enabled in self?.monitor.setSignificantChangesEnabled(enabled) }
     }
 
     func start() {
@@ -79,6 +85,8 @@ final class LocationRuntime {
     }
 
     private func evaluateStatus() {
+        // A known place wins immediately, even while motion history is pending.
+        if currentStatus.geofenceID != nil { publishStatus() }
         if evaluating { evaluateAgain = true; return }
         evaluating = true
         Task {
