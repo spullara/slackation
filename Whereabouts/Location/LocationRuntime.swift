@@ -13,6 +13,7 @@ final class LocationRuntime {
     let destinations: DestinationRegistry
     let engine: StatusEngine
     private let isPreview: Bool
+    private var initialMotionCheckFinished = false
     private var evaluating = false
     private var evaluateAgain = false
     private(set) var storageError: String?
@@ -95,6 +96,7 @@ final class LocationRuntime {
             repeat {
                 evaluateAgain = false
                 await driving.refresh()
+                initialMotionCheckFinished = true
                 if !isPreview && (driving.isDriving || monitor.isReady) { await engine.update(currentStatus) }
             } while evaluateAgain
             evaluating = false
@@ -104,6 +106,7 @@ final class LocationRuntime {
     private func publishStatus() {
         guard !isPreview, driving.isDriving || monitor.isReady else { return }
         let status = currentStatus
+        guard initialMotionCheckFinished || status.geofenceID != nil else { return }
         Task { await engine.update(status) }
     }
 

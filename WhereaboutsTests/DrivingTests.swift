@@ -90,6 +90,31 @@ final class DrivingTests: XCTestCase {
         motion.setEnabled(false)
     }
 
+    @MainActor
+    func testLaunchChecksRecentHistoryBeforeFirstSend() async throws {
+        let saved = defaults()
+        let now = Date()
+        var detector = DrivingDetector()
+        _ = detector.update(samples: [MotionSample(date: now.addingTimeInterval(-60), activity: .unknown, confidence: .low)], now: now)
+        saved.set(try JSONEncoder().encode(detector), forKey: "Whereabouts.drivingDetector")
+        let source = FakeMotionSource()
+        source.pauseHistory = true
+        let motion = DrivingMonitor(source: source, defaults: saved)
+        let (runtime, destination, _) = try runtime(motion: motion)
+        runtime.refreshMonitoring()
+        await waitUntil { source.resume != nil }
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(source.historyInterval), 900)
+        XCTAssertTrue(destination.calls.isEmpty)
+        source.pauseHistory = false
+        source.resume?.resume(returning: [
+            MotionSample(date: now.addingTimeInterval(-300), activity: .automotive, confidence: .medium)
+        ])
+        await waitUntil { destination.calls.count == 1 }
+        XCTAssertEqual(destination.calls.map(\.locationName), ["Driving"])
+        XCTAssertTrue(motion.isDriving)
+        motion.setEnabled(false)
+    }
+
     func testResolverPriorityAndReturnToPlace() {
         let place = Geofence(name: "Office", latitude: 0, longitude: 0, radius: 100, statusText: "At work", statusEmoji: ":office:")
         let inside = StatusResolver.resolve(geofences: [place], insideIDs: [place.id], other: OtherStatus(), isDriving: true)
@@ -485,6 +510,7 @@ private final class FakeMotionSource: MotionActivitySource {
     var receive: (([MotionSample]) -> Void)?
     var stops = 0
     var queries = 0
+    var historyInterval: TimeInterval?
     var pauseHistory = false
     var shouldThrow = false
     var resume: CheckedContinuation<[MotionSample], Never>?
@@ -492,6 +518,7 @@ private final class FakeMotionSource: MotionActivitySource {
     func stop() { stops += 1 }
     func history(from: Date, to: Date) async throws -> [MotionSample] {
         queries += 1
+        historyInterval = to.timeIntervalSince(from)
         let samples: [MotionSample]
         if pauseHistory { samples = await withCheckedContinuation { resume = $0 } }
         else { samples = [] }

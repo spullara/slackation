@@ -42,6 +42,13 @@ struct DrivingDetector: Codable {
         return isDriving
     }
 
+    mutating func replayHistory(samples: [MotionSample], now: Date) -> Bool {
+        lastSampleDate = nil
+        automotiveSince = nil
+        stoppedSince = nil
+        return update(samples: samples, now: now)
+    }
+
     private mutating func advance(to date: Date) {
         if let automotiveSince, date.timeIntervalSince(automotiveSince) >= Self.startDelay { isDriving = true }
         if let stoppedSince, date.timeIntervalSince(stoppedSince) >= Self.stopDelay { isDriving = false }

@@ -65,6 +65,7 @@ final class DrivingMonitor {
     private var detector: DrivingDetector
     private var timer: Timer?
     private var generation = 0
+    private var hasCheckedHistory = false
     private var queryID: UUID?
     private var querying: Bool { queryID != nil }
     private var queryTask: Task<Void, Never>?
@@ -153,7 +154,9 @@ final class DrivingMonitor {
         queryID = token
         queryLease = BackgroundLease()
         let now = Date()
-        let from = max(detector.lastSampleDate ?? now.addingTimeInterval(-86400), now.addingTimeInterval(-86400))
+        let lastSample = detector.lastSampleDate ?? now.addingTimeInterval(-86400)
+        let from = max(hasCheckedHistory ? lastSample : min(lastSample, now.addingTimeInterval(-900)),
+                       now.addingTimeInterval(-86400))
         let source = source
         // The source may ignore cancellation. It must not retain the monitor or its callers.
         queryTask = Task { [weak self] in
@@ -178,7 +181,7 @@ final class DrivingMonitor {
         case .success(let samples):
             let all = samples + buffered
             buffered = []
-            consume(all)
+            consume(all, replayHistory: !hasCheckedHistory && !samples.isEmpty)
         case .failure:
             if source.denied { start() }
             else { issue = "Could not read motion activity. The app will try again." }
@@ -199,6 +202,7 @@ final class DrivingMonitor {
     }
 
     private func finishRefresh() {
+        if queryID != nil { hasCheckedHistory = true }
         queryID = nil
         queryTask?.cancel()
         queryTask = nil
@@ -211,10 +215,12 @@ final class DrivingMonitor {
         for waiter in waiters { waiter.resume() }
     }
 
-    private func consume(_ samples: [MotionSample]) {
+    private func consume(_ samples: [MotionSample], replayHistory: Bool = false) {
         let lease = BackgroundLease()
         defer { lease.end() }
-        let next = detector.update(samples: samples, now: Date())
+        let next = replayHistory
+            ? detector.replayHistory(samples: samples, now: Date())
+            : detector.update(samples: samples, now: Date())
         persist()
         if next != isDriving { isDriving = next; onChange?() }
     }
