@@ -25,12 +25,71 @@ final class DrivingTests: XCTestCase {
         XCTAssertFalse(detector.update(samples: [sample(0, .automotive, .low), sample(10, .unknown)], now: start.addingTimeInterval(600)))
         XCTAssertTrue(detector.update(samples: [sample(601, .automotive), sample(602, .stopped, .low), sample(603, .unknown)], now: start.addingTimeInterval(1200)))
     }
-    func testUnknownBreaksMediumEvidenceAndHistoryIsOrdered() {
+    func testUnknownPreservesMediumEvidenceAndHistoryIsOrdered() {
         var detector = DrivingDetector()
-        XCTAssertFalse(detector.update(samples: [sample(90, .unknown), sample(0, .automotive, .medium)], now: start.addingTimeInterval(300)))
+        XCTAssertTrue(detector.update(samples: [sample(90, .unknown), sample(0, .automotive, .medium)], now: start.addingTimeInterval(300)))
         XCTAssertTrue(detector.update(samples: [sample(400, .automotive), sample(410, .stopped)], now: start.addingTimeInterval(529)))
         XCTAssertFalse(detector.update(samples: [sample(400, .automotive)], now: start.addingTimeInterval(530)))
     }
+    func testMediumStartsAfterTwoMinutesAcrossUnknownAndLowSamples() {
+        var detector = DrivingDetector()
+        XCTAssertFalse(detector.update(samples: [sample(0, .automotive, .medium),
+                                                 sample(30, .unknown), sample(60, .stopped, .low),
+                                                 sample(90, .automotive, .medium)],
+                                       now: start.addingTimeInterval(119)))
+        XCTAssertTrue(detector.update(samples: [], now: start.addingTimeInterval(120)))
+    }
+
+    @MainActor
+    func testRelaunchPublishesSavedDrivingAfterHistoryFailureOrTimeout() async throws {
+        for timesOut in [false, true] {
+            let saved = defaults()
+            var detector = DrivingDetector()
+            let now = Date()
+            _ = detector.update(samples: [MotionSample(date: now, activity: .automotive, confidence: .high)], now: now)
+            saved.set(try JSONEncoder().encode(detector), forKey: "Whereabouts.drivingDetector")
+            let source = FakeMotionSource()
+            source.shouldThrow = !timesOut
+            source.pauseHistory = timesOut
+            let motion = DrivingMonitor(source: source, defaults: saved, historyTimeout: 0.05)
+            XCTAssertTrue(motion.isDriving)
+            let (runtime, destination, _) = try runtime(motion: motion)
+            runtime.monitor.configure(geofences: [], other: OtherStatus())
+            runtime.monitor.onMotionWake?()
+            await waitUntil { motion.issue != nil && destination.calls.count == 1 }
+            XCTAssertTrue(motion.isDriving)
+            XCTAssertEqual(destination.calls.map(\.locationName), ["Driving"])
+            source.pauseHistory = false
+            source.resume?.resume(returning: [])
+            motion.setEnabled(false)
+        }
+    }
+
+    @MainActor
+    func testRelaunchWithExpiredStopAndStoppedHistoryPublishesOther() async throws {
+        let saved = defaults()
+        let now = Date()
+        let stopped = MotionSample(date: now.addingTimeInterval(-121), activity: .stopped, confidence: .high)
+        var detector = DrivingDetector()
+        _ = detector.update(samples: [MotionSample(date: now.addingTimeInterval(-180), activity: .automotive, confidence: .high), stopped], now: stopped.date)
+        XCTAssertTrue(detector.isDriving)
+        saved.set(try JSONEncoder().encode(detector), forKey: "Whereabouts.drivingDetector")
+        let source = FakeMotionSource()
+        source.pauseHistory = true
+        let motion = DrivingMonitor(source: source, defaults: saved)
+        XCTAssertFalse(motion.isDriving)
+        let (runtime, destination, _) = try runtime(motion: motion)
+        runtime.monitor.configure(geofences: [], other: OtherStatus())
+        runtime.monitor.onMotionWake?()
+        await waitUntil { source.resume != nil }
+        source.pauseHistory = false
+        source.resume?.resume(returning: [stopped])
+        await waitUntil { destination.calls.count == 1 }
+        XCTAssertFalse(motion.isDriving)
+        XCTAssertEqual(destination.calls.map(\.locationName), ["Other"])
+        motion.setEnabled(false)
+    }
+
     func testResolverPriorityAndReturnToPlace() {
         let place = Geofence(name: "Office", latitude: 0, longitude: 0, radius: 100, statusText: "At work", statusEmoji: ":office:")
         let inside = StatusResolver.resolve(geofences: [place], insideIDs: [place.id], other: OtherStatus(), isDriving: true)

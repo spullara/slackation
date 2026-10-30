@@ -23,10 +23,8 @@ struct DrivingDetector: Codable {
             if let lastSampleDate, sample.date <= lastSampleDate { continue }
             advance(to: sample.date)
             lastSampleDate = sample.date
-            // Uncertain intervals cannot establish either timed threshold.
+            // Uncertain samples do not change the last reliable activity.
             guard sample.confidence != .low, sample.activity != .unknown else {
-                automotiveSince = nil
-                stoppedSince = nil
                 continue
             }
             switch sample.activity {

@@ -85,6 +85,7 @@ final class DrivingMonitor {
         status = defaults.data(forKey: "Whereabouts.drivingStatus").flatMap { try? JSONDecoder().decode(OtherStatus.self, from: $0) }
             ?? OtherStatus(text: "Driving", emoji: ":car:", emojiUnicode: "🚗")
         detector = defaults.data(forKey: "Whereabouts.drivingDetector").flatMap { try? JSONDecoder().decode(DrivingDetector.self, from: $0) } ?? DrivingDetector()
+        isDriving = detector.update(samples: [], now: Date())
     }
 
     func saveStatus(_ status: OtherStatus) {
@@ -109,9 +110,6 @@ final class DrivingMonitor {
         guard source.available, !source.denied else {
             issue = source.available ? "Motion access is disabled. Allow Motion & Fitness access in Settings." : "Motion detection is not available on this device."
             stop()
-            detector = DrivingDetector()
-            persist()
-            isDriving = false
             return
         }
         issue = nil
