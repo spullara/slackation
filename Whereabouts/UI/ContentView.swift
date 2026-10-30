@@ -53,6 +53,10 @@ struct HomeView: View {
             }
             Section {
                 NavigationLink("Driving") { DrivingSettingsView(runtime: runtime) }
+                if runtime.driving.isLiveLocationActive {
+                    Label("Live location on while driving", systemImage: "location.fill")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
                 if let issue = runtime.driving.issue, runtime.driving.enabled {
                     ErrorText(message: issue)
                     Button("Open motion settings") { openURL(URL(string: UIApplication.openSettingsURLString)!) }

@@ -1,4 +1,5 @@
 import CoreMotion
+import CoreLocation
 import Observation
 
 @MainActor
@@ -56,6 +57,7 @@ final class DrivingMonitor {
     private(set) var isDriving = false
     private(set) var issue: String?
     private(set) var isMonitoring = false
+    private(set) var isLiveLocationActive = false
     private(set) var enabled: Bool
     private(set) var status: OtherStatus
     var onChange: (() -> Void)?
@@ -75,9 +77,20 @@ final class DrivingMonitor {
     private var refreshWaiters: [CheckedContinuation<Void, Never>] = []
     private var buffered: [MotionSample] = []
     private let preview: Bool
+    private let locationSource: DrivingLocationSource
+    private let now: () -> Date
+    private let checkInterval: TimeInterval
+    private var liveStartedAt: Date?
+    private var lowSpeedSince: Date?
+    private var lastLocationDate: Date?
 
     init(source: MotionActivitySource? = nil, defaults: UserDefaults = .standard, preview: Bool = false,
-         historyTimeout: TimeInterval = DrivingDetector.historyTimeout) {
+         historyTimeout: TimeInterval = DrivingDetector.historyTimeout,
+         locationSource: DrivingLocationSource? = nil, now: @escaping () -> Date = Date.init,
+         checkInterval: TimeInterval = DrivingDetector.checkInterval) {
+        self.locationSource = locationSource ?? CoreDrivingLocationSource()
+        self.now = now
+        self.checkInterval = checkInterval
         self.historyTimeout = historyTimeout
         self.source = source ?? CoreMotionSource()
         self.defaults = defaults
@@ -86,7 +99,8 @@ final class DrivingMonitor {
         status = defaults.data(forKey: "Whereabouts.drivingStatus").flatMap { try? JSONDecoder().decode(OtherStatus.self, from: $0) }
             ?? OtherStatus(text: "Driving", emoji: ":car:", emojiUnicode: "🚗")
         detector = defaults.data(forKey: "Whereabouts.drivingDetector").flatMap { try? JSONDecoder().decode(DrivingDetector.self, from: $0) } ?? DrivingDetector()
-        isDriving = detector.update(samples: [], now: Date())
+        isDriving = detector.update(samples: [], now: now())
+        self.locationSource.onActiveChange = { [weak self] active in self?.isLiveLocationActive = active }
     }
 
     func saveStatus(_ status: OtherStatus) {
@@ -120,19 +134,23 @@ final class DrivingMonitor {
         guard !isMonitoring else { return }
         isMonitoring = true
         onMonitoringChange?(true)
+        updateLiveLocation()
         let token = generation
         source.start { [weak self] samples in
             guard let self, self.isMonitoring, self.generation == token else { return }
             if self.querying { self.buffered += samples }
             else { self.consume(samples) }
         }
-        timer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self, self.isMonitoring, !self.querying else { return }
-                if self.source.denied { self.start(); self.onChange?() }
-                else { self.consume([]) }
-            }
+        timer = Timer.scheduledTimer(withTimeInterval: checkInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.checkDriving() }
         }
+    }
+
+    private func checkDriving() {
+        guard isMonitoring else { return }
+        if source.denied || !source.available { start(); onChange?(); return }
+        // A history query must not suspend the live stop or safety timers.
+        consume([])
     }
 
     func refresh() async {
@@ -153,7 +171,7 @@ final class DrivingMonitor {
     private func beginRefresh(_ token: UUID) {
         queryID = token
         queryLease = BackgroundLease()
-        let now = Date()
+        let now = now()
         let lastSample = detector.lastSampleDate ?? now.addingTimeInterval(-86400)
         let from = max(hasCheckedHistory ? lastSample : min(lastSample, now.addingTimeInterval(-900)),
                        now.addingTimeInterval(-86400))
@@ -196,9 +214,11 @@ final class DrivingMonitor {
     private func cancelRefresh(_ token: UUID, timedOut: Bool) {
         guard queryID == token else { return }
         if timedOut { issue = "Motion activity timed out. The app will try again." }
-        // Preserve the last known state when no history result is available.
+        let samples = buffered
         buffered = []
-        finishRefresh()
+        if source.denied || !source.available { start(); onChange?() }
+        else if isMonitoring { consume(samples) }
+        if queryID == token { finishRefresh() }
     }
 
     private func finishRefresh() {
@@ -218,14 +238,60 @@ final class DrivingMonitor {
     private func consume(_ samples: [MotionSample], replayHistory: Bool = false) {
         let lease = BackgroundLease()
         defer { lease.end() }
-        let next = replayHistory
-            ? detector.replayHistory(samples: samples, now: Date())
-            : detector.update(samples: samples, now: Date())
+        let date = now()
+        _ = replayHistory
+            ? detector.replayHistory(samples: samples, now: date)
+            : detector.update(samples: samples, now: date)
+        if let liveStartedAt {
+            let lastAutomotive = max(liveStartedAt, detector.lastAutomotiveDate ?? liveStartedAt)
+            if date.timeIntervalSince(lastAutomotive) >= DrivingDetector.liveLocationSafetyTimeout
+                || lowSpeedSince.map({ date.timeIntervalSince($0) >= DrivingDetector.stopDelay }) == true {
+                detector.endDriving(at: date)
+            }
+        }
         persist()
-        if next != isDriving { isDriving = next; onChange?() }
+        let changed = detector.isDriving != isDriving
+        isDriving = detector.isDriving
+        updateLiveLocation()
+        if changed { onChange?() }
     }
+    private func updateLiveLocation() {
+        if isMonitoring && isDriving {
+            guard liveStartedAt == nil else { return }
+            liveStartedAt = now()
+            locationSource.start { [weak self] locations in self?.receiveLocations(locations) }
+        } else { stopLiveLocation() }
+    }
+
+    private func receiveLocations(_ locations: [CLLocation]) {
+        guard let liveStartedAt, isMonitoring else { return }
+        let date = now()
+        for location in locations.sorted(by: { $0.timestamp < $1.timestamp }) {
+            guard location.timestamp <= date,
+                  location.timestamp >= liveStartedAt,
+                  date.timeIntervalSince(location.timestamp) <= DrivingDetector.checkInterval * 2,
+                  lastLocationDate.map({ location.timestamp > $0 }) ?? true else { continue }
+            lastLocationDate = location.timestamp
+            if location.horizontalAccuracy >= 0 && location.speed >= 0
+                && location.speed < DrivingDetector.lowSpeedThreshold {
+                lowSpeedSince = lowSpeedSince ?? location.timestamp
+            } else { lowSpeedSince = nil }
+        }
+        checkDriving()
+    }
+
+    private func stopLiveLocation() {
+        guard liveStartedAt != nil else { return }
+        liveStartedAt = nil
+        lowSpeedSince = nil
+        lastLocationDate = nil
+        locationSource.stop()
+        isLiveLocationActive = false
+    }
+
     private func persist() { defaults.set(try? JSONEncoder().encode(detector), forKey: "Whereabouts.drivingDetector") }
     private func stop() {
+        stopLiveLocation()
         generation += 1
         finishRefresh()
         buffered = []

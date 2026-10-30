@@ -51,7 +51,7 @@ final class DrivingTests: XCTestCase {
             let source = FakeMotionSource()
             source.shouldThrow = !timesOut
             source.pauseHistory = timesOut
-            let motion = DrivingMonitor(source: source, defaults: saved, historyTimeout: 0.05)
+            let motion = DrivingMonitor(source: source, defaults: saved, historyTimeout: 0.05, locationSource: FakeDrivingLocationSource())
             XCTAssertTrue(motion.isDriving)
             let (runtime, destination, _) = try runtime(motion: motion)
             runtime.monitor.configure(geofences: [], other: OtherStatus())
@@ -76,7 +76,7 @@ final class DrivingTests: XCTestCase {
         saved.set(try JSONEncoder().encode(detector), forKey: "Whereabouts.drivingDetector")
         let source = FakeMotionSource()
         source.pauseHistory = true
-        let motion = DrivingMonitor(source: source, defaults: saved)
+        let motion = DrivingMonitor(source: source, defaults: saved, locationSource: FakeDrivingLocationSource())
         XCTAssertFalse(motion.isDriving)
         let (runtime, destination, _) = try runtime(motion: motion)
         runtime.monitor.configure(geofences: [], other: OtherStatus())
@@ -99,7 +99,7 @@ final class DrivingTests: XCTestCase {
         saved.set(try JSONEncoder().encode(detector), forKey: "Whereabouts.drivingDetector")
         let source = FakeMotionSource()
         source.pauseHistory = true
-        let motion = DrivingMonitor(source: source, defaults: saved)
+        let motion = DrivingMonitor(source: source, defaults: saved, locationSource: FakeDrivingLocationSource())
         let (runtime, destination, _) = try runtime(motion: motion)
         runtime.refreshMonitoring()
         await waitUntil { source.resume != nil }
@@ -131,7 +131,7 @@ final class DrivingTests: XCTestCase {
     func testOffStopsMonitoringAndIgnoresLateSamples() async {
         let source = FakeMotionSource()
         let defaults = defaults()
-        let monitor = DrivingMonitor(source: source, defaults: defaults)
+        let monitor = DrivingMonitor(source: source, defaults: defaults, locationSource: FakeDrivingLocationSource())
         var locationMonitoring: [Bool] = []
         monitor.onMonitoringChange = { locationMonitoring.append($0) }
         XCTAssertTrue(monitor.enabled)
@@ -146,13 +146,13 @@ final class DrivingTests: XCTestCase {
         XCTAssertEqual(source.queries, 1)
         XCTAssertGreaterThan(source.stops, 0)
         XCTAssertEqual(locationMonitoring, [true, false, false])
-        XCTAssertFalse(DrivingMonitor(source: source, defaults: defaults).enabled)
+        XCTAssertFalse(DrivingMonitor(source: source, defaults: defaults, locationSource: FakeDrivingLocationSource()).enabled)
     }
     @MainActor
     func testDeniedAndUnavailableFallBackAndSettingsPersist() async {
         let source = FakeMotionSource()
         let defaults = defaults()
-        let monitor = DrivingMonitor(source: source, defaults: defaults)
+        let monitor = DrivingMonitor(source: source, defaults: defaults, locationSource: FakeDrivingLocationSource())
         source.denied = true
         await monitor.refresh()
         XCTAssertNotNil(monitor.issue)
@@ -164,13 +164,13 @@ final class DrivingTests: XCTestCase {
         XCTAssertTrue(monitor.issue!.contains("not available"))
         let status = OtherStatus(text: "On the road", emoji: ":taxi:")
         monitor.saveStatus(status)
-        XCTAssertEqual(DrivingMonitor(source: source, defaults: defaults).status, status)
+        XCTAssertEqual(DrivingMonitor(source: source, defaults: defaults, locationSource: FakeDrivingLocationSource()).status, status)
     }
     @MainActor
     func testDisableDuringHistoryRejectsPendingResult() async {
         let source = FakeMotionSource()
         source.pauseHistory = true
-        let monitor = DrivingMonitor(source: source, defaults: defaults())
+        let monitor = DrivingMonitor(source: source, defaults: defaults(), locationSource: FakeDrivingLocationSource())
         let refresh = Task { await monitor.refresh() }
         while source.resume == nil { await Task.yield() }
         monitor.setEnabled(false)
@@ -184,7 +184,7 @@ final class DrivingTests: XCTestCase {
     func testHistoryReplaysBeforeBufferedLiveSample() async {
         let source = FakeMotionSource()
         source.pauseHistory = true
-        let monitor = DrivingMonitor(source: source, defaults: defaults())
+        let monitor = DrivingMonitor(source: source, defaults: defaults(), locationSource: FakeDrivingLocationSource())
         let refresh = Task { await monitor.refresh() }
         while source.resume == nil { await Task.yield() }
         let now = Date()
@@ -198,7 +198,7 @@ final class DrivingTests: XCTestCase {
     @MainActor
     func testRegionEntryPublishesBeforeHistoryAndDrivingEndIsDeduplicated() async throws {
         let source = FakeMotionSource()
-        let motion = DrivingMonitor(source: source, defaults: defaults())
+        let motion = DrivingMonitor(source: source, defaults: defaults(), locationSource: FakeDrivingLocationSource())
         await motion.refresh()
         source.receive?([MotionSample(date: Date().addingTimeInterval(-180), activity: .automotive, confidence: .high)])
         XCTAssertTrue(motion.isDriving)
@@ -222,7 +222,7 @@ final class DrivingTests: XCTestCase {
     @MainActor
     func testRegionExitRefreshesHistoryBeforePublishingDriving() async throws {
         let source = FakeMotionSource()
-        let motion = DrivingMonitor(source: source, defaults: defaults())
+        let motion = DrivingMonitor(source: source, defaults: defaults(), locationSource: FakeDrivingLocationSource())
         let (runtime, destination, region) = try runtime(motion: motion)
         runtime.monitor.locationManager(CLLocationManager(), didEnterRegion: region)
         await waitUntil { destination.calls.count == 1 && source.queries > 0 }
@@ -245,7 +245,7 @@ final class DrivingTests: XCTestCase {
     @MainActor
     func testRegionExitWaitsForHistoryStartedByEnablingDriving() async throws {
         let source = FakeMotionSource()
-        let motion = DrivingMonitor(source: source, defaults: defaults())
+        let motion = DrivingMonitor(source: source, defaults: defaults(), locationSource: FakeDrivingLocationSource())
         motion.setEnabled(false)
         let (runtime, destination, region) = try runtime(motion: motion)
         runtime.monitor.locationManager(CLLocationManager(), didEnterRegion: region)
@@ -272,7 +272,7 @@ final class DrivingTests: XCTestCase {
     @MainActor
     func testFailedSharedHistoryKeepsKnownDrivingAndReleasesCallers() async {
         let source = FakeMotionSource()
-        let motion = DrivingMonitor(source: source, defaults: defaults())
+        let motion = DrivingMonitor(source: source, defaults: defaults(), locationSource: FakeDrivingLocationSource())
         await motion.refresh()
         source.receive?([MotionSample(date: Date(), activity: .automotive, confidence: .high)])
         XCTAssertTrue(motion.isDriving)
@@ -301,7 +301,7 @@ final class DrivingTests: XCTestCase {
     func testDisableReleasesSharedHistoryWaiterAndRejectsLateResult() async {
         let source = FakeMotionSource()
         source.pauseHistory = true
-        let motion = DrivingMonitor(source: source, defaults: defaults())
+        let motion = DrivingMonitor(source: source, defaults: defaults(), locationSource: FakeDrivingLocationSource())
         let first = Task { await motion.refresh() }
         await waitUntil { source.resume != nil }
         var secondFinished = false
@@ -322,7 +322,7 @@ final class DrivingTests: XCTestCase {
     @MainActor
     func testMotionChangeDuringSlowSendPublishesFinalStateInOrder() async throws {
         let source = FakeMotionSource()
-        let motion = DrivingMonitor(source: source, defaults: defaults())
+        let motion = DrivingMonitor(source: source, defaults: defaults(), locationSource: FakeDrivingLocationSource())
         let (runtime, destination, _) = try runtime(motion: motion)
         runtime.monitor.configure(geofences: [], other: OtherStatus())
         runtime.monitor.onMotionWake?()
@@ -353,7 +353,7 @@ final class DrivingTests: XCTestCase {
     func testTimeoutReleasesOwnerAndWaitersAndRejectsLateResultDuringNewQuery() async {
         let source = FakeMotionSource()
         source.pauseHistory = true
-        let motion = DrivingMonitor(source: source, defaults: defaults(), historyTimeout: 0.05)
+        let motion = DrivingMonitor(source: source, defaults: defaults(), historyTimeout: 0.05, locationSource: FakeDrivingLocationSource())
         var ownerFinished = false
         var waiterFinished = false
         let owner = Task { await motion.refresh(); ownerFinished = true }
@@ -387,7 +387,7 @@ final class DrivingTests: XCTestCase {
         for cancelOwner in [true, false] {
             let source = FakeMotionSource()
             source.pauseHistory = true
-            let motion = DrivingMonitor(source: source, defaults: defaults(), historyTimeout: 60)
+            let motion = DrivingMonitor(source: source, defaults: defaults(), historyTimeout: 60, locationSource: FakeDrivingLocationSource())
             var ownerFinished = false
             var waiterFinished = false
             let owner = Task { await motion.refresh(); ownerFinished = true }
@@ -416,7 +416,7 @@ final class DrivingTests: XCTestCase {
     func testRegionExitTimeoutPublishesLastKnownDrivingOrOther() async throws {
         for wasDriving in [true, false] {
             let source = FakeMotionSource()
-            let motion = DrivingMonitor(source: source, defaults: defaults(), historyTimeout: 0.05)
+            let motion = DrivingMonitor(source: source, defaults: defaults(), historyTimeout: 0.05, locationSource: FakeDrivingLocationSource())
             await motion.refresh()
             if wasDriving {
                 source.receive?([MotionSample(date: Date(), activity: .automotive, confidence: .high)])
@@ -449,7 +449,7 @@ final class DrivingTests: XCTestCase {
     @MainActor
     func testDisableReleasesRuntimeOwnedQueryWithoutSourceCallback() async throws {
         let source = FakeMotionSource()
-        let motion = DrivingMonitor(source: source, defaults: defaults(), historyTimeout: 60)
+        let motion = DrivingMonitor(source: source, defaults: defaults(), historyTimeout: 60, locationSource: FakeDrivingLocationSource())
         await motion.refresh()
         source.receive?([MotionSample(date: Date(), activity: .automotive, confidence: .high)])
         let (runtime, destination, _) = try runtime(motion: motion)
@@ -469,6 +469,153 @@ final class DrivingTests: XCTestCase {
         try? await Task.sleep(for: .milliseconds(5))
         XCTAssertFalse(motion.isDriving)
         XCTAssertEqual(runtime.currentStatus.locationName, "Other")
+    }
+
+    @MainActor
+    func testLiveLocationStartsAndStopsWithDrivingOrDisabledMotion() async {
+        for reason in ["stopped", "disabled", "denied"] {
+            let source = FakeMotionSource()
+            let location = FakeDrivingLocationSource()
+            var now = start
+            let motion = DrivingMonitor(source: source, defaults: defaults(), locationSource: location, now: { now })
+            await motion.refresh()
+            XCTAssertEqual(location.starts, 0)
+            source.receive?([sample(0, .automotive)])
+            XCTAssertTrue(motion.isLiveLocationActive)
+            XCTAssertEqual(location.starts, 1)
+            await motion.refresh()
+            XCTAssertEqual(location.starts, 1)
+            switch reason {
+            case "stopped":
+                now = start.addingTimeInterval(121)
+                source.receive?([sample(1, .stopped)])
+            case "disabled": motion.setEnabled(false)
+            default:
+                source.denied = true
+                await motion.refresh()
+            }
+            XCTAssertFalse(motion.isDriving)
+            XCTAssertFalse(motion.isLiveLocationActive)
+            XCTAssertEqual(location.stops, 1)
+            location.receive?([fix(at: now, speed: 0)])
+            XCTAssertFalse(motion.isLiveLocationActive, "A late location cannot restart the session.")
+            motion.setEnabled(false)
+        }
+    }
+
+    @MainActor
+    func testLiveTimerEndsDrivingAndPublishesOtherAfterTwoMinutes() async throws {
+        let source = FakeMotionSource()
+        let location = FakeDrivingLocationSource()
+        var now = start
+        let motion = DrivingMonitor(source: source, defaults: defaults(), locationSource: location,
+                                    now: { now }, checkInterval: 0.01)
+        let (runtime, destination, _) = try runtime(motion: motion)
+        runtime.monitor.configure(geofences: [], other: OtherStatus())
+        runtime.monitor.onMotionWake?()
+        await waitUntil { destination.calls.last?.locationName == "Other" }
+        source.receive?([sample(0, .automotive)])
+        await waitUntil { destination.calls.last?.locationName == "Driving" }
+        now = start.addingTimeInterval(1)
+        source.receive?([sample(1, .stopped)])
+        now = start.addingTimeInterval(120)
+        try? await Task.sleep(for: .milliseconds(30))
+        XCTAssertTrue(motion.isDriving)
+        XCTAssertTrue(motion.isLiveLocationActive)
+        now = start.addingTimeInterval(121)
+        await waitUntil { !motion.isDriving && destination.calls.last?.locationName == "Other" }
+        XCTAssertEqual(destination.calls.map(\.locationName), ["Other", "Driving", "Other"])
+        XCTAssertEqual(location.stops, 1)
+        motion.setEnabled(false)
+    }
+
+    @MainActor
+    func testLowSpeedStopsAfterTwoMinutesAndFasterOrInvalidSpeedResetsIt() async {
+        let source = FakeMotionSource()
+        let location = FakeDrivingLocationSource()
+        var now = start
+        let motion = DrivingMonitor(source: source, defaults: defaults(), locationSource: location, now: { now })
+        await motion.refresh()
+        source.receive?([sample(0, .automotive)])
+        location.receive?([fix(at: now, speed: 0)])
+        now = start.addingTimeInterval(119)
+        location.receive?([fix(at: now, speed: 3)])
+        now = start.addingTimeInterval(120)
+        location.receive?([fix(at: now, speed: 0)])
+        now = start.addingTimeInterval(239)
+        location.receive?([fix(at: now, speed: -1)])
+        XCTAssertTrue(motion.isDriving)
+        now = start.addingTimeInterval(240)
+        location.receive?([fix(at: now, speed: 1)])
+        now = start.addingTimeInterval(359)
+        location.receive?([fix(at: now, speed: 1)])
+        XCTAssertTrue(motion.isDriving)
+        now = start.addingTimeInterval(360)
+        location.receive?([fix(at: now, speed: 1)])
+        XCTAssertFalse(motion.isDriving)
+        XCTAssertFalse(motion.isLiveLocationActive)
+        XCTAssertEqual(location.stops, 1)
+        // An old automotive result must not undo the location stop.
+        source.receive?([sample(1, .automotive)])
+        XCTAssertFalse(motion.isDriving)
+        motion.setEnabled(false)
+    }
+
+    @MainActor
+    func testLiveLocationSafetyStopsThreeHoursAfterLastAutomotiveSample() async {
+        let source = FakeMotionSource()
+        let location = FakeDrivingLocationSource()
+        var now = start
+        let motion = DrivingMonitor(source: source, defaults: defaults(), locationSource: location,
+                                    now: { now }, checkInterval: 0.01)
+        await motion.refresh()
+        source.receive?([sample(0, .automotive)])
+        now = start.addingTimeInterval(60)
+        source.receive?([sample(60, .automotive)])
+        now = start.addingTimeInterval(DrivingDetector.liveLocationSafetyTimeout + 59)
+        try? await Task.sleep(for: .milliseconds(30))
+        XCTAssertTrue(motion.isLiveLocationActive)
+        now = now.addingTimeInterval(1)
+        await waitUntil { !motion.isLiveLocationActive }
+        XCTAssertFalse(motion.isDriving)
+        XCTAssertEqual(location.stops, 1)
+        motion.setEnabled(false)
+    }
+
+    @MainActor
+    func testTimeoutAndCancellationConsumeBufferedSamplesButDisableDiscardsThem() async {
+        for reason in ["timeout", "cancel", "disable"] {
+            for activity in [MotionSample.Activity.automotive, .stopped] {
+                let source = FakeMotionSource()
+                let location = FakeDrivingLocationSource()
+                var now = start
+                let motion = DrivingMonitor(source: source, defaults: defaults(),
+                                            historyTimeout: reason == "timeout" ? 0.05 : 60,
+                                            locationSource: location, now: { now })
+                await motion.refresh()
+                if activity == .stopped { source.receive?([sample(0, .automotive)]) }
+                source.pauseHistory = true
+                let refresh = Task { await motion.refresh() }
+                await waitUntil { source.resume != nil }
+                now = start.addingTimeInterval(121)
+                source.receive?([sample(1, activity)])
+                if reason == "cancel" { refresh.cancel() }
+                if reason == "disable" { motion.setEnabled(false) }
+                await refresh.value
+                let expected = reason != "disable" && activity == .automotive
+                XCTAssertEqual(motion.isDriving, expected, reason)
+                XCTAssertEqual(motion.isLiveLocationActive, expected, reason)
+                source.resume?.resume(returning: [sample(120, .automotive)])
+                for _ in 0..<10 { await Task.yield() }
+                XCTAssertEqual(motion.isDriving, expected, "A cancelled query must reject its late history.")
+                motion.setEnabled(false)
+            }
+        }
+    }
+
+    private func fix(at date: Date, speed: Double) -> CLLocation {
+        CLLocation(coordinate: CLLocationCoordinate2D(latitude: 0, longitude: 0), altitude: 0,
+                   horizontalAccuracy: 10, verticalAccuracy: 10, course: 0, speed: speed, timestamp: date)
     }
 
     @MainActor
@@ -543,5 +690,22 @@ private final class RecordingDestination: StatusDestination {
             await withCheckedContinuation { self.resume = $0 }
         }
         return .sent
+    }
+}
+
+@MainActor
+private final class FakeDrivingLocationSource: DrivingLocationSource {
+    var onActiveChange: ((Bool) -> Void)?
+    var receive: (([CLLocation]) -> Void)?
+    var starts = 0
+    var stops = 0
+    func start(_ receive: @escaping ([CLLocation]) -> Void) {
+        self.receive = receive
+        starts += 1
+        onActiveChange?(true)
+    }
+    func stop() {
+        stops += 1
+        onActiveChange?(false)
     }
 }

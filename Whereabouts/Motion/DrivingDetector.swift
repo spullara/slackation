@@ -12,9 +12,13 @@ struct MotionSample: Sendable {
 struct DrivingDetector: Codable {
     static let startDelay: TimeInterval = 120
     static let stopDelay: TimeInterval = 120
+    static let lowSpeedThreshold: Double = 2
+    static let liveLocationSafetyTimeout: TimeInterval = 3 * 60 * 60
+    static let checkInterval: TimeInterval = 15
     static let historyTimeout: TimeInterval = 10
     private(set) var isDriving = false
     private(set) var lastSampleDate: Date?
+    private(set) var lastAutomotiveDate: Date?
     private var automotiveSince: Date?
     private var stoppedSince: Date?
 
@@ -29,6 +33,7 @@ struct DrivingDetector: Codable {
             }
             switch sample.activity {
             case .automotive:
+                lastAutomotiveDate = sample.date
                 stoppedSince = nil
                 automotiveSince = automotiveSince ?? sample.date
                 if sample.confidence == .high { isDriving = true }
@@ -47,6 +52,13 @@ struct DrivingDetector: Codable {
         automotiveSince = nil
         stoppedSince = nil
         return update(samples: samples, now: now)
+    }
+
+    mutating func endDriving(at date: Date) {
+        isDriving = false
+        automotiveSince = nil
+        stoppedSince = nil
+        lastSampleDate = date
     }
 
     private mutating func advance(to date: Date) {
