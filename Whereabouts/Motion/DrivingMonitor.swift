@@ -110,6 +110,9 @@ final class DrivingMonitor {
         guard source.available, !source.denied else {
             issue = source.available ? "Motion access is disabled. Allow Motion & Fitness access in Settings." : "Motion detection is not available on this device."
             stop()
+            detector = DrivingDetector()
+            persist()
+            isDriving = false
             return
         }
         issue = nil
