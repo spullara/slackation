@@ -12,6 +12,7 @@ final class LocationMonitor: NSObject, @preconcurrency CLLocationManagerDelegate
     private var locationRequested = false
     private let locationKey = "Whereabouts.lastLocation"
     private(set) var insideIDs: Set<UUID> = []
+    var eventLog: EventLog = .shared
     var onMotionWake: (() -> Void)?
     private var significantChangesEnabled = false
     var isReady: Bool { pendingIDs.isEmpty }
@@ -120,6 +121,11 @@ final class LocationMonitor: NSObject, @preconcurrency CLLocationManagerDelegate
         publishIfReady()
     }
 
+    private func logRegion(_ region: CLRegion, action: String) {
+        guard let place = geofences.first(where: { prefix + $0.id.uuidString == region.identifier }) else { return }
+        eventLog.append(.geofence, "geofence \(action): \(place.name)")
+    }
+
     private func publishIfReady() {
         // Do not send Other while initial region states are still unknown.
         guard pendingIDs.isEmpty else { return }
@@ -138,6 +144,7 @@ final class LocationMonitor: NSObject, @preconcurrency CLLocationManagerDelegate
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last(where: { $0.horizontalAccuracy >= 0 && CLLocationCoordinate2DIsValid($0.coordinate) }) else { return }
+        eventLog.append(.app, locationRequested ? "wake: requested location" : "wake: significant change")
         onMotionWake?()
         currentLocation = location
         UserDefaults.standard.set([location.coordinate.latitude, location.coordinate.longitude], forKey: locationKey)
@@ -146,8 +153,8 @@ final class LocationMonitor: NSObject, @preconcurrency CLLocationManagerDelegate
         locationError = nil
     }
 
-    func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) { update(region, inside: true) }
-    func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) { update(region, inside: false) }
+    func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) { logRegion(region, action: "enter"); update(region, inside: true) }
+    func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) { logRegion(region, action: "exit"); update(region, inside: false) }
     func locationManager(_ manager: CLLocationManager, didDetermineState state: CLRegionState, for region: CLRegion) {
         guard state != .unknown else { return }
         update(region, inside: state == .inside)

@@ -6,6 +6,7 @@ import UIKit
 @Observable
 final class LocationRuntime {
     static let shared = LocationRuntime()
+    let eventLog: EventLog
     let store: GeofenceStore
     let webhooks = WebhookStore()
     let monitor = LocationMonitor()
@@ -19,17 +20,20 @@ final class LocationRuntime {
     private(set) var storageError: String?
 
     init(store: GeofenceStore? = nil, driving: DrivingMonitor? = nil,
-         destinations: DestinationRegistry? = nil, defaults: UserDefaults = .standard) {
+         destinations: DestinationRegistry? = nil, defaults: UserDefaults = .standard, eventLog: EventLog? = nil) {
+        let eventLog = eventLog ?? EventLog.shared
+        self.eventLog = eventLog
         self.store = store ?? GeofenceStore()
         #if DEBUG
         isPreview = ProcessInfo.processInfo.arguments.contains("--preview-driving")
-        self.driving = driving ?? DrivingMonitor(preview: isPreview)
+        self.driving = driving ?? DrivingMonitor(preview: isPreview, eventLog: eventLog)
         #else
         isPreview = false
-        self.driving = driving ?? DrivingMonitor()
+        self.driving = driving ?? DrivingMonitor(eventLog: eventLog)
         #endif
         self.destinations = destinations ?? DestinationRegistry(destinations: [SlackDestination()])
-        engine = StatusEngine(registry: self.destinations, defaults: defaults)
+        engine = StatusEngine(registry: self.destinations, defaults: defaults, eventLog: eventLog)
+        monitor.eventLog = eventLog
         monitor.onStatusChange = { [weak self] _ in self?.evaluateStatus() }
         monitor.onMotionWake = { [weak self] in self?.evaluateStatus() }
         self.driving.onChange = { [weak self] in
@@ -115,6 +119,8 @@ final class LocationRuntime {
 final class LocationAppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        EventLog.shared.append(.app, "app launch: \(application.applicationState == .background ? "background" : "foreground")"
+            + (launchOptions?[.location] != nil ? "; wake: location (region or significant change)" : ""))
         LocationRuntime.shared.start()
         return true
     }

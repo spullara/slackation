@@ -8,13 +8,16 @@ final class StatusEngine {
     private(set) var lastSentDates: [String: Date] = [:]
     private(set) var lastErrors: [String: String] = [:]
     private(set) var isSending = false
+    private let eventLog: EventLog
+    private var lastResolved: LocationStatus?
     private let registry: DestinationRegistry
     private var revisions: [String: UUID] = [:]
     private var pending: LocationStatus?
     private let defaults: UserDefaults
     private static let lastStatusKey = "Whereabouts.destinationStatuses"
 
-    init(registry: DestinationRegistry, defaults: UserDefaults = .standard) {
+    init(registry: DestinationRegistry, defaults: UserDefaults = .standard, eventLog: EventLog? = nil) {
+        self.eventLog = eventLog ?? .shared
         self.registry = registry
         self.defaults = defaults
         lastSentDates = defaults.dictionary(forKey: "Whereabouts.destinationStatusDates") as? [String: Date] ?? [:]
@@ -38,6 +41,16 @@ final class StatusEngine {
     /// Serializes events and retains only the latest pending status.
     /// Destinations publish concurrently, with independent success and error state.
     func update(_ status: LocationStatus) async {
+        if lastResolved != status {
+            let reason: String
+            switch status.kind {
+            case .geofence: reason = "inside \(status.locationName)"
+            case .driving: reason = "driving"
+            case .other: reason = "outside all geofences"
+            }
+            eventLog.append(.status, "status resolved: \(status.text) — \(reason)")
+            lastResolved = status
+        }
         pending = status
         guard !isSending else { return }
         isSending = true
@@ -51,10 +64,14 @@ final class StatusEngine {
                 return Task { @MainActor in
                     guard self.revisions[destination.id] == revision,
                           self.registry.enabledIDs.contains(destination.id), destination.isConfigured else { return }
-                    guard self.lastSentStatuses[destination.id] != next else { return }
+                    guard self.lastSentStatuses[destination.id] != next else {
+                        self.eventLog.append(.send, "send \(destination.displayName): skipped as duplicate")
+                        return
+                    }
                     do {
                         let outcome = try await destination.publish(next)
                         guard self.revisions[destination.id] == revision else { return }
+                        self.eventLog.append(.send, "send \(destination.displayName): \(outcome == .sent ? "sent" : "skipped as duplicate")")
                         self.lastSentStatuses[destination.id] = next
                         if case .sent = outcome {
                             self.lastSentDates[destination.id] = Date()
@@ -66,6 +83,7 @@ final class StatusEngine {
                         }
                     } catch {
                         guard self.revisions[destination.id] == revision else { return }
+                        self.eventLog.sendError(destination: destination.displayName, error: error)
                         self.lastErrors[destination.id] = error.localizedDescription
                     }
                 }

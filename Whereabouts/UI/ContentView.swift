@@ -96,6 +96,7 @@ struct HomeView: View {
             Section {
                 NavigationLink("Other status") { OtherStatusView(runtime: runtime) }
             } footer: { Text("Use this status outside all saved geofences.") }
+            Section { NavigationLink("Event log") { EventLogView(log: runtime.eventLog) } }
             if let error = runtime.storageError { Section("Storage error") { ErrorText(message: error) } }
         }.navigationTitle("Home")
             .onAppear { configuredIDs = Set(runtime.destinations.destinations.filter { $0.isConfigured }.map(\.id)) }
